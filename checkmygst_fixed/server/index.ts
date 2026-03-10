@@ -37,11 +37,9 @@ function setupRequestLogging(app: express.Application) {
 
 function serveStaticApp(app: express.Application) {
   const staticPath = path.resolve(process.cwd(), "static-build", "web");
-
   if (fs.existsSync(staticPath)) {
     log(`Serving static build from: ${staticPath}`);
     app.use(express.static(staticPath));
-
     app.use((req: Request, res: Response) => {
       if (req.path.startsWith("/api")) return;
       const indexPath = path.join(staticPath, "index.html");
@@ -52,29 +50,7 @@ function serveStaticApp(app: express.Application) {
       }
     });
   } else {
-    app.use((req: Request, res: Response) => {
-      if (req.path.startsWith("/api")) return;
-      const indexPath = path.join(staticPath, "index.html");
-      if (fs.existsSync(indexPath)) {
-        res.sendFile(indexPath);
-      } else {
-        res.status(404).send("Build not found.");
-      }
-    });
-```
-
-6. Scroll to the bottom of the page
-7. You will see a green **"Commit changes"** button — click it
-8. A popup appears — click **"Commit directly to main"** → click green **"Commit changes"**
-9. The page reloads — you should see **"2 minutes ago"** or similar next to the file name — that confirms it saved
-
----
-
-**Step 3 — Check the commit changed**
-
-Go to:
-```
-github.com/samantaraunakin-sudo/CHECKMYGST2/commits/main
+    app.get("/", (_req: Request, res: Response) => {
       res.json({ status: "CheckMyGST API running" });
     });
   }
