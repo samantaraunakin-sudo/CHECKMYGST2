@@ -10,18 +10,10 @@ const log = console.log;
 function setupCors(app: express.Application) {
   app.use((req, res, next) => {
     const origin = req.header("origin") || "";
-    const isLocalhost =
-      origin.startsWith("http://localhost:") ||
-      origin.startsWith("http://127.0.0.1:");
-    const allowedOrigin = process.env.ALLOWED_ORIGIN || "";
-
-    if (isLocalhost || !allowedOrigin || (allowedOrigin && origin === allowedOrigin)) {
-      res.header("Access-Control-Allow-Origin", origin || "*");
-      res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-      res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
-      res.header("Access-Control-Allow-Credentials", "true");
-    }
-
+    res.header("Access-Control-Allow-Origin", origin || "*");
+    res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+    res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    res.header("Access-Control-Allow-Credentials", "true");
     if (req.method === "OPTIONS") return res.sendStatus(200);
     next();
   });
@@ -47,24 +39,21 @@ function serveStaticApp(app: express.Application) {
   const staticPath = path.resolve(process.cwd(), "static-build", "web");
 
   if (fs.existsSync(staticPath)) {
-    log(`Serving static Expo web build from: ${staticPath}`);
+    log(`Serving static build from: ${staticPath}`);
     app.use(express.static(staticPath));
-    app.get("/{*splat}", (req: Request, res: Response) => {
+
+    app.use((req: Request, res: Response) => {
       if (req.path.startsWith("/api")) return;
       const indexPath = path.join(staticPath, "index.html");
       if (fs.existsSync(indexPath)) {
         res.sendFile(indexPath);
       } else {
-        res.status(404).send("index.html not found in static build.");
+        res.status(404).send("Build not found.");
       }
     });
   } else {
     app.get("/", (_req: Request, res: Response) => {
-      res.json({
-        status: "CheckMyGST API running",
-        message: "Web build not found. Run: npm run build:web",
-        endpoints: ["POST /api/extract-invoice", "POST /api/hsn-lookup", "POST /api/extract-gstr2b"],
-      });
+      res.json({ status: "CheckMyGST API running" });
     });
   }
 }
@@ -74,7 +63,7 @@ function setupErrorHandler(app: express.Application) {
     const error = err as { status?: number; statusCode?: number; message?: string };
     console.error("Server error:", err);
     if (res.headersSent) return;
-    res.status(error.status || error.statusCode || 500).json({ message: error.message || "Internal Server Error" });
+    res.status(error.status || 500).json({ message: error.message || "Internal Server Error" });
   });
 }
 
