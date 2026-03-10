@@ -19,7 +19,6 @@ export default function LoginScreen() {
       if (isLogin) {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
-        router.replace("/(tabs)");
       } else {
         const { error } = await supabase.auth.signUp({ email, password });
         if (error) throw error;
