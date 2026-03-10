@@ -49,7 +49,7 @@ function serveStaticApp(app: express.Application) {
   if (fs.existsSync(staticPath)) {
     log(`Serving static Expo web build from: ${staticPath}`);
     app.use(express.static(staticPath));
-    app.get("*", (req: Request, res: Response) => {
+    app.get("/{*splat}", (req: Request, res: Response) => {
       if (req.path.startsWith("/api")) return;
       const indexPath = path.join(staticPath, "index.html");
       if (fs.existsSync(indexPath)) {
