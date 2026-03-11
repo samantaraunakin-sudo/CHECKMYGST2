@@ -7,17 +7,6 @@ import React, {
   useCallback,
   ReactNode,
 } from "react";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-export interface Client {
-  id: string;
-  businessName: string;
-  ownerName: string;
-  gstin: string;
-  phone: string;
-  email: string;
-  businessType: string;
-  createdAt: string;
-}
 import { supabase } from "@/lib/supabase";
 
 export interface BusinessProfile {
@@ -73,6 +62,17 @@ export interface GSTR2BEntry {
   totalITC: number;
   gstRate: number;
   period: string;
+}
+
+export interface Client {
+  id: string;
+  businessName: string;
+  ownerName: string;
+  gstin: string;
+  phone: string;
+  email: string;
+  businessType: string;
+  createdAt: string;
 }
 
 export type ReconciliationStatus =
@@ -151,30 +151,14 @@ export function getMonthLabel(monthKey: string): string {
   return `${months[parseInt(month) - 1]} ${year}`;
 }
 
-async function load<T>(key: string, fallback: T): Promise<T> {
-  try {
-    const raw = await AsyncStorage.getItem(key);
-    return raw ? JSON.parse(raw) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-async function save(key: string, value: unknown) {
-  await AsyncStorage.setItem(key, JSON.stringify(value));
-}
-
 interface GSTContextValue {
   profile: BusinessProfile | null;
   purchases: PurchaseInvoice[];
   sales: SalesInvoice[];
   gstr2bEntries: GSTR2BEntry[];
+  clients: Client[];
   isLoaded: boolean;
   currentUserEmail: string;
-  clients: Client[];
-addClient: (data: Omit<Client, "id" | "createdAt">) => Promise<Client>;
-updateClient: (id: string, data: Partial<Client>) => Promise<void>;
-deleteClient: (id: string) => Promise<void>;
 
   saveProfile: (data: Omit<BusinessProfile, "id">) => Promise<void>;
 
@@ -191,9 +175,12 @@ deleteClient: (id: string) => Promise<void>;
   addGSTR2BEntries: (entries: Omit<GSTR2BEntry, "id">[]) => Promise<void>;
   clearGSTR2B: () => Promise<void>;
 
+  addClient: (data: Omit<Client, "id" | "createdAt">) => Promise<Client>;
+  updateClient: (id: string, data: Partial<Client>) => Promise<void>;
+  deleteClient: (id: string) => Promise<void>;
+
   getSuppliers: () => SupplierSummary[];
   getCustomers: () => CustomerSummary[];
-
   getReconciliation: () => ReconciliationResult[];
   getRiskLevel: (results: ReconciliationResult[]) => "green" | "yellow" | "red";
   getITCSummary: (results: ReconciliationResult[]) => {
@@ -213,32 +200,98 @@ export function GSTProvider({ children }: { children: ReactNode }) {
   const [purchases, setPurchases] = useState<PurchaseInvoice[]>([]);
   const [sales, setSales] = useState<SalesInvoice[]>([]);
   const [gstr2bEntries, setGstr2bEntries] = useState<GSTR2BEntry[]>([]);
-  const [isLoaded, setIsLoaded] = useState(false);
   const [clients, setClients] = useState<Client[]>([]);
-
-  const getKeys = (uid: string) => ({
-    PROFILE: `${uid}_gst_profile`,
-    PURCHASES: `${uid}_gst_purchases`,
-    SALES: `${uid}_gst_sales`,
-    GSTR2B: `${uid}_gst_gstr2b`,
-    CLIENTS: `${uid}_gst_clients`,
-  });
+  const [isLoaded, setIsLoaded] = useState(false);
 
   const loadUserData = useCallback(async (uid: string) => {
     setIsLoaded(false);
-    const KEYS = getKeys(uid);
-    const [p, pur, s, g, cl] = await Promise.all([
-      load<BusinessProfile | null>(KEYS.PROFILE, null),
-      load<PurchaseInvoice[]>(KEYS.PURCHASES, []),
-      load<SalesInvoice[]>(KEYS.SALES, []),
-      load<GSTR2BEntry[]>(KEYS.GSTR2B, []),
-      load<Client[]>(KEYS.CLIENTS, []),
-    ]);
-    setProfile(p);
-    setPurchases(pur);
-    setSales(s);
-    setGstr2bEntries(g);
-    setClients(cl);
+    try {
+      const [profileRes, purchasesRes, salesRes, gstr2bRes, clientsRes] = await Promise.all([
+        supabase.from("profiles").select("*").eq("id", uid).single(),
+        supabase.from("purchases").select("*").eq("user_id", uid).order("created_at", { ascending: false }),
+        supabase.from("sales").select("*").eq("user_id", uid).order("created_at", { ascending: false }),
+        supabase.from("gstr2b_entries").select("*").eq("user_id", uid),
+        supabase.from("clients").select("*").eq("user_id", uid),
+      ]);
+
+      if (profileRes.data) {
+        setProfile({
+          id: profileRes.data.id,
+          businessName: profileRes.data.business_name || "",
+          ownerName: profileRes.data.owner_name || "",
+          gstin: profileRes.data.gstin || "",
+          phone: profileRes.data.phone || "",
+          email: profileRes.data.email || "",
+          businessType: profileRes.data.business_type || "",
+        });
+      }
+
+      if (purchasesRes.data) {
+        setPurchases(purchasesRes.data.map((p: any) => ({
+          id: p.id,
+          supplierName: p.supplier_name || "",
+          supplierGSTIN: p.supplier_gstin || "",
+          invoiceNumber: p.invoice_number || "",
+          invoiceDate: p.invoice_date || "",
+          description: p.description || "",
+          hsn: p.hsn || "",
+          gstRate: p.gst_rate || 0,
+          taxableAmount: p.taxable_amount || 0,
+          gstAmount: p.gst_amount || 0,
+          totalAmount: p.total_amount || 0,
+          createdAt: p.created_at || "",
+        })));
+      }
+
+      if (salesRes.data) {
+        setSales(salesRes.data.map((s: any) => ({
+          id: s.id,
+          customerName: s.customer_name || "",
+          customerGSTIN: s.customer_gstin || "",
+          invoiceNumber: s.invoice_number || "",
+          invoiceDate: s.invoice_date || "",
+          description: s.description || "",
+          hsn: s.hsn || "",
+          gstRate: s.gst_rate || 0,
+          taxableAmount: s.taxable_amount || 0,
+          gstAmount: s.gst_amount || 0,
+          totalAmount: s.total_amount || 0,
+          createdAt: s.created_at || "",
+        })));
+      }
+
+      if (gstr2bRes.data) {
+        setGstr2bEntries(gstr2bRes.data.map((g: any) => ({
+          id: g.id,
+          supplierName: g.supplier_name || "",
+          supplierGSTIN: g.supplier_gstin || "",
+          invoiceNumber: g.invoice_number || "",
+          invoiceDate: g.invoice_date || "",
+          taxableAmount: g.taxable_amount || 0,
+          igst: g.igst || 0,
+          cgst: g.cgst || 0,
+          sgst: g.sgst || 0,
+          totalITC: g.total_itc || 0,
+          gstRate: g.gst_rate || 0,
+          period: g.period || "",
+        })));
+      }
+
+      if (clientsRes.data) {
+        setClients(clientsRes.data.map((c: any) => ({
+          id: c.id,
+          businessName: c.business_name || "",
+          ownerName: c.owner_name || "",
+          gstin: c.gstin || "",
+          phone: c.phone || "",
+          email: c.email || "",
+          businessType: c.business_type || "",
+          createdAt: c.created_at || "",
+        })));
+      }
+    } catch (err) {
+      console.error("Error loading user data:", err);
+    }
     setIsLoaded(true);
   }, []);
 
@@ -259,6 +312,8 @@ export function GSTProvider({ children }: { children: ReactNode }) {
         setUserId(session.user.id);
         setCurrentUserEmail(session.user.email || "");
         loadUserData(session.user.id);
+      } else {
+        setIsLoaded(true);
       }
     });
 
@@ -277,121 +332,225 @@ export function GSTProvider({ children }: { children: ReactNode }) {
 
   const saveProfile = useCallback(async (data: Omit<BusinessProfile, "id">) => {
     if (!userId) return;
-    const p: BusinessProfile = { ...data, id: profile?.id || generateId() };
-    setProfile(p);
-    await save(getKeys(userId).PROFILE, p);
-  }, [profile, userId]);
+    await supabase.from("profiles").upsert({
+      id: userId,
+      business_name: data.businessName,
+      owner_name: data.ownerName,
+      gstin: data.gstin,
+      phone: data.phone,
+      email: data.email,
+      business_type: data.businessType,
+      updated_at: new Date().toISOString(),
+    });
+    setProfile({ ...data, id: userId });
+  }, [userId]);
 
   const addPurchase = useCallback(async (data: Omit<PurchaseInvoice, "id" | "createdAt">): Promise<PurchaseInvoice> => {
     if (!userId) throw new Error("Not logged in");
-    const p: PurchaseInvoice = { ...data, id: generateId(), createdAt: new Date().toISOString() };
-    const updated = [...purchases, p];
-    setPurchases(updated);
-    await save(getKeys(userId).PURCHASES, updated);
-    return p;
-  }, [purchases, userId]);
+    const id = generateId();
+    const { error } = await supabase.from("purchases").insert({
+      id,
+      user_id: userId,
+      supplier_name: data.supplierName,
+      supplier_gstin: data.supplierGSTIN,
+      invoice_number: data.invoiceNumber,
+      invoice_date: data.invoiceDate,
+      description: data.description,
+      hsn: data.hsn,
+      gst_rate: data.gstRate,
+      taxable_amount: data.taxableAmount,
+      gst_amount: data.gstAmount,
+      total_amount: data.totalAmount,
+    });
+    if (error) throw error;
+    const newPurchase = { ...data, id, createdAt: new Date().toISOString() };
+    setPurchases(prev => [newPurchase, ...prev]);
+    return newPurchase;
+  }, [userId]);
 
   const updatePurchase = useCallback(async (id: string, data: Partial<PurchaseInvoice>) => {
     if (!userId) return;
-    const updated = purchases.map((p) => (p.id === id ? { ...p, ...data } : p));
-    setPurchases(updated);
-    await save(getKeys(userId).PURCHASES, updated);
-  }, [purchases, userId]);
+    await supabase.from("purchases").update({
+      supplier_name: data.supplierName,
+      supplier_gstin: data.supplierGSTIN,
+      invoice_number: data.invoiceNumber,
+      invoice_date: data.invoiceDate,
+      description: data.description,
+      hsn: data.hsn,
+      gst_rate: data.gstRate,
+      taxable_amount: data.taxableAmount,
+      gst_amount: data.gstAmount,
+      total_amount: data.totalAmount,
+    }).eq("id", id);
+    setPurchases(prev => prev.map(p => p.id === id ? { ...p, ...data } : p));
+  }, [userId]);
 
   const deletePurchase = useCallback(async (id: string) => {
     if (!userId) return;
-    const updated = purchases.filter((p) => p.id !== id);
-    setPurchases(updated);
-    await save(getKeys(userId).PURCHASES, updated);
-  }, [purchases, userId]);
+    await supabase.from("purchases").delete().eq("id", id);
+    setPurchases(prev => prev.filter(p => p.id !== id));
+  }, [userId]);
 
   const updateSupplierAcrossPurchases = useCallback(async (
     oldKey: string,
     newData: { supplierName: string; supplierGSTIN: string }
   ) => {
     if (!userId) return;
-    const updated = purchases.map((p) => {
+    const toUpdate = purchases.filter(p => (p.supplierGSTIN || p.supplierName) === oldKey);
+    for (const p of toUpdate) {
+      await supabase.from("purchases").update({
+        supplier_name: newData.supplierName,
+        supplier_gstin: newData.supplierGSTIN,
+      }).eq("id", p.id);
+    }
+    setPurchases(prev => prev.map(p => {
       const key = p.supplierGSTIN || p.supplierName;
       if (key === oldKey) return { ...p, supplierName: newData.supplierName, supplierGSTIN: newData.supplierGSTIN };
       return p;
-    });
-    setPurchases(updated);
-    await save(getKeys(userId).PURCHASES, updated);
+    }));
   }, [purchases, userId]);
 
   const addSale = useCallback(async (data: Omit<SalesInvoice, "id" | "createdAt">): Promise<SalesInvoice> => {
     if (!userId) throw new Error("Not logged in");
-    const s: SalesInvoice = { ...data, id: generateId(), createdAt: new Date().toISOString() };
-    const updated = [...sales, s];
-    setSales(updated);
-    await save(getKeys(userId).SALES, updated);
-    return s;
-  }, [sales, userId]);
+    const id = generateId();
+    const { error } = await supabase.from("sales").insert({
+      id,
+      user_id: userId,
+      customer_name: data.customerName,
+      customer_gstin: data.customerGSTIN,
+      invoice_number: data.invoiceNumber,
+      invoice_date: data.invoiceDate,
+      description: data.description,
+      hsn: data.hsn,
+      gst_rate: data.gstRate,
+      taxable_amount: data.taxableAmount,
+      gst_amount: data.gstAmount,
+      total_amount: data.totalAmount,
+    });
+    if (error) throw error;
+    const newSale = { ...data, id, createdAt: new Date().toISOString() };
+    setSales(prev => [newSale, ...prev]);
+    return newSale;
+  }, [userId]);
 
   const updateSale = useCallback(async (id: string, data: Partial<SalesInvoice>) => {
     if (!userId) return;
-    const updated = sales.map((s) => (s.id === id ? { ...s, ...data } : s));
-    setSales(updated);
-    await save(getKeys(userId).SALES, updated);
-  }, [sales, userId]);
+    await supabase.from("sales").update({
+      customer_name: data.customerName,
+      customer_gstin: data.customerGSTIN,
+      invoice_number: data.invoiceNumber,
+      invoice_date: data.invoiceDate,
+      description: data.description,
+      hsn: data.hsn,
+      gst_rate: data.gstRate,
+      taxable_amount: data.taxableAmount,
+      gst_amount: data.gstAmount,
+      total_amount: data.totalAmount,
+    }).eq("id", id);
+    setSales(prev => prev.map(s => s.id === id ? { ...s, ...data } : s));
+  }, [userId]);
 
   const deleteSale = useCallback(async (id: string) => {
     if (!userId) return;
-    const updated = sales.filter((s) => s.id !== id);
-    setSales(updated);
-    await save(getKeys(userId).SALES, updated);
-  }, [sales, userId]);
+    await supabase.from("sales").delete().eq("id", id);
+    setSales(prev => prev.filter(s => s.id !== id));
+  }, [userId]);
 
   const updateCustomerAcrossSales = useCallback(async (
     oldKey: string,
     newData: { customerName: string; customerGSTIN: string }
   ) => {
     if (!userId) return;
-    const updated = sales.map((s) => {
+    const toUpdate = sales.filter(s => (s.customerGSTIN || s.customerName) === oldKey);
+    for (const s of toUpdate) {
+      await supabase.from("sales").update({
+        customer_name: newData.customerName,
+        customer_gstin: newData.customerGSTIN,
+      }).eq("id", s.id);
+    }
+    setSales(prev => prev.map(s => {
       const key = s.customerGSTIN || s.customerName;
       if (key === oldKey) return { ...s, customerName: newData.customerName, customerGSTIN: newData.customerGSTIN };
       return s;
-    });
-    setSales(updated);
-    await save(getKeys(userId).SALES, updated);
+    }));
   }, [sales, userId]);
 
   const addGSTR2BEntries = useCallback(async (entries: Omit<GSTR2BEntry, "id">[]) => {
     if (!userId) return;
-    const newEntries = entries.map((e) => ({ ...e, id: generateId() }));
-    const updated = [...gstr2bEntries, ...newEntries];
-    setGstr2bEntries(updated);
-    await save(getKeys(userId).GSTR2B, updated);
-  }, [gstr2bEntries, userId]);
+    const newEntries = entries.map(e => ({
+      id: generateId(),
+      user_id: userId,
+      supplier_name: e.supplierName,
+      supplier_gstin: e.supplierGSTIN,
+      invoice_number: e.invoiceNumber,
+      invoice_date: e.invoiceDate,
+      taxable_amount: e.taxableAmount,
+      igst: e.igst,
+      cgst: e.cgst,
+      sgst: e.sgst,
+      total_itc: e.totalITC,
+      gst_rate: e.gstRate,
+      period: e.period,
+    }));
+    await supabase.from("gstr2b_entries").insert(newEntries);
+    setGstr2bEntries(prev => [...prev, ...newEntries.map(e => ({
+      id: e.id,
+      supplierName: e.supplier_name,
+      supplierGSTIN: e.supplier_gstin,
+      invoiceNumber: e.invoice_number,
+      invoiceDate: e.invoice_date,
+      taxableAmount: e.taxable_amount,
+      igst: e.igst,
+      cgst: e.cgst,
+      sgst: e.sgst,
+      totalITC: e.total_itc,
+      gstRate: e.gst_rate,
+      period: e.period,
+    }))]);
+  }, [userId]);
 
   const clearGSTR2B = useCallback(async () => {
     if (!userId) return;
+    await supabase.from("gstr2b_entries").delete().eq("user_id", userId);
     setGstr2bEntries([]);
-    await save(getKeys(userId).GSTR2B, []);
   }, [userId]);
 
   const addClient = useCallback(async (data: Omit<Client, "id" | "createdAt">): Promise<Client> => {
-  if (!userId) throw new Error("Not logged in");
-  const c: Client = { ...data, id: generateId(), createdAt: new Date().toISOString() };
-  const updated = [...clients, c];
-  setClients(updated);
-  await save(getKeys(userId).CLIENTS, updated);
-  return c;
-}, [clients, userId]);
+    if (!userId) throw new Error("Not logged in");
+    const id = generateId();
+    await supabase.from("clients").insert({
+      id,
+      user_id: userId,
+      business_name: data.businessName,
+      owner_name: data.ownerName,
+      gstin: data.gstin,
+      phone: data.phone,
+      email: data.email,
+      business_type: data.businessType,
+    });
+    const newClient = { ...data, id, createdAt: new Date().toISOString() };
+    setClients(prev => [...prev, newClient]);
+    return newClient;
+  }, [userId]);
 
-const updateClient = useCallback(async (id: string, data: Partial<Client>) => {
-  if (!userId) return;
-  const updated = clients.map((c) => (c.id === id ? { ...c, ...data } : c));
-  setClients(updated);
-  await save(getKeys(userId).CLIENTS, updated);
-}, [clients, userId]);
+  const updateClient = useCallback(async (id: string, data: Partial<Client>) => {
+    if (!userId) return;
+    await supabase.from("clients").update({
+      business_name: data.businessName,
+      owner_name: data.ownerName,
+      gstin: data.gstin,
+      phone: data.phone,
+      email: data.email,
+      business_type: data.businessType,
+    }).eq("id", id);
+    setClients(prev => prev.map(c => c.id === id ? { ...c, ...data } : c));
+  }, [userId]);
 
-const deleteClient = useCallback(async (id: string) => {
-  if (!userId) return;
-  const updated = clients.filter((c) => c.id !== id);
-  setClients(updated);
-  await save(getKeys(userId).CLIENTS, updated);
-}, [clients, userId]);
+  const deleteClient = useCallback(async (id: string) => {
+    if (!userId) return;
+    await supabase.from("clients").delete().eq("id", id);
+    setClients(prev => prev.filter(c => c.id !== id));
+  }, [userId]);
 
   const getSuppliers = useCallback((): SupplierSummary[] => {
     const map = new Map<string, SupplierSummary>();
@@ -450,11 +609,9 @@ const deleteClient = useCallback(async (id: string) => {
   const getReconciliation = useCallback((): ReconciliationResult[] => {
     const results: ReconciliationResult[] = [];
     const matchedGSTR2BIds = new Set<string>();
-
     for (const purchase of purchases) {
       const match = gstr2bEntries.find(
-        (g) =>
-          g.supplierGSTIN.toLowerCase() === purchase.supplierGSTIN.toLowerCase() &&
+        g => g.supplierGSTIN.toLowerCase() === purchase.supplierGSTIN.toLowerCase() &&
           g.invoiceNumber.toLowerCase() === purchase.invoiceNumber.toLowerCase()
       );
       if (match) {
@@ -486,7 +643,6 @@ const deleteClient = useCallback(async (id: string) => {
         });
       }
     }
-
     for (const gstr2b of gstr2bEntries) {
       if (!matchedGSTR2BIds.has(gstr2b.id)) {
         results.push({
@@ -501,16 +657,13 @@ const deleteClient = useCallback(async (id: string) => {
         });
       }
     }
-
     return results;
   }, [purchases, gstr2bEntries]);
 
   const getRiskLevel = useCallback((results: ReconciliationResult[]): "green" | "yellow" | "red" => {
     if (results.length === 0) return "green";
-    const critical = results.filter(
-      (r) => r.status === "supplier_not_filed" || r.status === "missing_from_register"
-    ).length;
-    const mismatches = results.filter((r) => r.status === "amount_mismatch").length;
+    const critical = results.filter(r => r.status === "supplier_not_filed" || r.status === "missing_from_register").length;
+    const mismatches = results.filter(r => r.status === "amount_mismatch").length;
     if (critical > 0) return "red";
     if (mismatches > 0) return "yellow";
     return "green";
@@ -518,14 +671,14 @@ const deleteClient = useCallback(async (id: string) => {
 
   const getITCSummary = useCallback((results: ReconciliationResult[]) => {
     const totalITCAvailable = gstr2bEntries.reduce((s, g) => s + g.totalITC, 0);
-    const itcMatched = results.filter((r) => r.status === "matched").reduce((s, r) => s + (r.gstr2bAmount ?? 0), 0);
-    const itcAtRisk = results.filter((r) => r.status === "supplier_not_filed").reduce((s, r) => s + (r.purchaseAmount ?? 0), 0);
-    const itcRecoverable = results.filter((r) => r.status === "missing_from_register").reduce((s, r) => s + (r.gstr2bAmount ?? 0), 0);
+    const itcMatched = results.filter(r => r.status === "matched").reduce((s, r) => s + (r.gstr2bAmount ?? 0), 0);
+    const itcAtRisk = results.filter(r => r.status === "supplier_not_filed").reduce((s, r) => s + (r.purchaseAmount ?? 0), 0);
+    const itcRecoverable = results.filter(r => r.status === "missing_from_register").reduce((s, r) => s + (r.gstr2bAmount ?? 0), 0);
     return { totalITCAvailable, itcMatched, itcAtRisk, itcRecoverable };
   }, [gstr2bEntries]);
 
   const value = useMemo<GSTContextValue>(() => ({
-    profile, purchases, sales, gstr2bEntries, isLoaded, currentUserEmail, clients,
+    profile, purchases, sales, gstr2bEntries, clients, isLoaded, currentUserEmail,
     saveProfile,
     addPurchase, updatePurchase, deletePurchase, updateSupplierAcrossPurchases,
     addSale, updateSale, deleteSale, updateCustomerAcrossSales,
@@ -534,7 +687,7 @@ const deleteClient = useCallback(async (id: string) => {
     getSuppliers, getCustomers,
     getReconciliation, getRiskLevel, getITCSummary,
   }), [
-    profile, purchases, sales, gstr2bEntries, isLoaded, currentUserEmail, clients,
+    profile, purchases, sales, gstr2bEntries, clients, isLoaded, currentUserEmail,
     saveProfile,
     addPurchase, updatePurchase, deletePurchase, updateSupplierAcrossPurchases,
     addSale, updateSale, deleteSale, updateCustomerAcrossSales,
