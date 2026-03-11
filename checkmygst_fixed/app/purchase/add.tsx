@@ -54,8 +54,36 @@ export default function AddPurchaseScreen() {
   const updateForm = (key: string, value: string) => setForm(p => ({ ...p, [key]: value }));
 
   const updateItem = (id: string, key: keyof LineItem, value: string | number) => {
-    setItems(prev => prev.map(item => item.id === id ? { ...item, [key]: value } : item));
-  };
+  setItems(prev => prev.map(item => item.id === id ? { ...item, [key]: value } : item));
+  // Auto-lookup when HSN code is entered (4+ digits)
+  if (key === "hsn" && typeof value === "string" && value.length >= 4) {
+    handleHSNReverseLookup(id, value);
+  }
+};
+
+const handleHSNReverseLookup = async (itemId: string, hsn: string) => {
+  try {
+    const url = new URL("/api/hsn-reverse-lookup", getApiUrl());
+    const res = await fetch(url.toString(), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ hsn }),
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.gstRate) {
+      setItems(prev => prev.map(item =>
+        item.id === itemId ? {
+          ...item,
+          gstRate: data.gstRate,
+          description: item.description || data.description || "",
+        } : item
+      ));
+    }
+  } catch {
+    // silent fail
+  }
+};
 
   const addItem = () => {
     setItems(prev => [...prev, { id: generateId(), description: "", hsn: "", quantity: "", rate: "", gstRate: 18 }]);
