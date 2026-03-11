@@ -1,6 +1,12 @@
-import { Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold, useFonts } from "@expo-google-fonts/inter";
+import {
+  Inter_400Regular,
+  Inter_500Medium,
+  Inter_600SemiBold,
+  Inter_700Bold,
+  useFonts,
+} from "@expo-google-fonts/inter";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { Stack, router } from "expo-router";
+import { Slot, Stack, router } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect, useState } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
@@ -9,10 +15,19 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { queryClient } from "@/lib/query-client";
 import { GSTProvider } from "@/contexts/GSTContext";
 import { supabase } from "@/lib/supabase";
+import { Session } from "@supabase/supabase-js";
 
 SplashScreen.preventAutoHideAsync();
 
-function RootLayoutNav() {
+function RootLayoutNav({ session }: { session: Session | null }) {
+  useEffect(() => {
+    if (session) {
+      router.replace("/(tabs)");
+    } else {
+      router.replace("/login");
+    }
+  }, [session]);
+
   return (
     <Stack screenOptions={{ headerBackTitle: "Back" }}>
       <Stack.Screen name="login" options={{ headerShown: false }} />
@@ -29,31 +44,38 @@ function RootLayoutNav() {
 }
 
 export default function RootLayout() {
+  const [session, setSession] = useState<Session | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+
   const [fontsLoaded, fontError] = useFonts({
-    Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold,
+    Inter_400Regular,
+    Inter_500Medium,
+    Inter_600SemiBold,
+    Inter_700Bold,
   });
-  const [session, setSession] = useState<any>(undefined);
 
   useEffect(() => {
+    // Get initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
+      setAuthLoading(false);
     });
+
+    // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
     });
+
     return () => subscription.unsubscribe();
   }, []);
 
   useEffect(() => {
-    if ((fontsLoaded || fontError) && session !== undefined) {
+    if ((fontsLoaded || fontError) && !authLoading) {
       SplashScreen.hideAsync();
-      if (!session) {
-        router.replace("/login");
-      }
     }
-  }, [fontsLoaded, fontError, session]);
+  }, [fontsLoaded, fontError, authLoading]);
 
-  if ((!fontsLoaded && !fontError) || session === undefined) return null;
+  if ((!fontsLoaded && !fontError) || authLoading) return null;
 
   return (
     <ErrorBoundary>
@@ -61,7 +83,7 @@ export default function RootLayout() {
         <GSTProvider>
           <GestureHandlerRootView>
             <KeyboardProvider>
-              <RootLayoutNav />
+              <RootLayoutNav session={session} />
             </KeyboardProvider>
           </GestureHandlerRootView>
         </GSTProvider>
