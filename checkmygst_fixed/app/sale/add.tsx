@@ -53,37 +53,9 @@ export default function AddSaleScreen() {
 
   const updateForm = (key: string, value: string) => setForm(p => ({ ...p, [key]: value }));
 
- const updateItem = (id: string, key: keyof LineItem, value: string | number) => {
-  setItems(prev => prev.map(item => item.id === id ? { ...item, [key]: value } : item));
-  // Auto-lookup when HSN code is entered (4+ digits)
-  if (key === "hsn" && typeof value === "string" && value.length >= 4) {
-    handleHSNReverseLookup(id, value);
-  }
-};
-
-const handleHSNReverseLookup = async (itemId: string, hsn: string) => {
-  try {
-    const url = new URL("/api/hsn-reverse-lookup", getApiUrl());
-    const res = await fetch(url.toString(), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ hsn }),
-    });
-    if (!res.ok) return;
-    const data = await res.json();
-    if (data.gstRate) {
-      setItems(prev => prev.map(item =>
-        item.id === itemId ? {
-          ...item,
-          gstRate: data.gstRate,
-          description: item.description || data.description || "",
-        } : item
-      ));
-    }
-  } catch {
-    // silent fail
-  }
-};
+  const updateItem = (id: string, key: keyof LineItem, value: string | number) => {
+    setItems(prev => prev.map(item => item.id === id ? { ...item, [key]: value } : item));
+  };
 
   const addItem = () => {
     setItems(prev => [...prev, { id: generateId(), description: "", hsn: "", quantity: "", rate: "", gstRate: 18 }]);
@@ -94,6 +66,7 @@ const handleHSNReverseLookup = async (itemId: string, hsn: string) => {
     setItems(prev => prev.filter(item => item.id !== id));
   };
 
+  // Type product name → get HSN + GST rate
   const handleHSNLookup = async (itemId: string, query: string) => {
     if (!query.trim()) return;
     setHsnLoading(itemId);
@@ -104,11 +77,42 @@ const handleHSNReverseLookup = async (itemId: string, hsn: string) => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query: query.trim() }),
       });
-      if (!res.ok) throw new Error("Lookup failed");
+      if (!res.ok) throw new Error();
       const data = await res.json();
-      if (data.hsn) updateItem(itemId, "hsn", data.hsn);
-      if (data.gstRate) updateItem(itemId, "gstRate", data.gstRate);
-      if (data.description) updateItem(itemId, "description", data.description);
+      setItems(prev => prev.map(item =>
+        item.id === itemId ? {
+          ...item,
+          hsn: data.hsn || item.hsn,
+          gstRate: data.gstRate || item.gstRate,
+        } : item
+      ));
+    } catch {
+      Alert.alert("Error", "Could not find HSN for this product");
+    } finally {
+      setHsnLoading(null);
+    }
+  };
+
+  // Type HSN code → get product name + GST rate automatically
+  const handleHSNReverseLookup = async (itemId: string, hsn: string) => {
+    if (!hsn || hsn.length < 4) return;
+    setHsnLoading(itemId);
+    try {
+      const url = new URL("/api/hsn-reverse-lookup", getApiUrl());
+      const res = await fetch(url.toString(), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hsn }),
+      });
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      setItems(prev => prev.map(item =>
+        item.id === itemId ? {
+          ...item,
+          description: data.description || item.description,
+          gstRate: data.gstRate || item.gstRate,
+        } : item
+      ));
     } catch {
       // silent fail
     } finally {
@@ -116,6 +120,7 @@ const handleHSNReverseLookup = async (itemId: string, hsn: string) => {
     }
   };
 
+  // Scan invoice photo → auto-fill everything
   const handlePickImage = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ["images"],
@@ -140,12 +145,14 @@ const handleHSNReverseLookup = async (itemId: string, hsn: string) => {
       });
       if (!res.ok) throw new Error("Extraction failed");
       const data = await res.json();
+
       setForm({
         customerName: data.customerName || data.supplierName || "",
         customerGSTIN: data.customerGSTIN || data.supplierGSTIN || "",
         invoiceNumber: data.invoiceNumber || "",
         invoiceDate: data.invoiceDate || getTodayDate(),
       });
+
       if (data.items && Array.isArray(data.items) && data.items.length > 0) {
         setItems(data.items.map((item: any) => ({
           id: generateId(),
@@ -173,7 +180,6 @@ const handleHSNReverseLookup = async (itemId: string, hsn: string) => {
     }
   };
 
-  // Totals
   const subtotal = items.reduce((sum, item) => sum + calcItem(item).taxable, 0);
   const totalGST = items.reduce((sum, item) => sum + calcItem(item).gst, 0);
   const totalBeforeRound = subtotal + totalGST;
@@ -184,7 +190,7 @@ const handleHSNReverseLookup = async (itemId: string, hsn: string) => {
     if (!form.customerName.trim()) { Alert.alert("Required", "Customer name is required"); return; }
     if (!form.invoiceNumber.trim()) { Alert.alert("Required", "Invoice number is required"); return; }
     const validItems = items.filter(i => i.description.trim() && parseFloat(i.quantity || "0") > 0 && parseFloat(i.rate || "0") > 0);
-    if (validItems.length === 0) { Alert.alert("Required", "At least one valid product with quantity and rate is required"); return; }
+    if (validItems.length === 0) { Alert.alert("Required", "At least one product with quantity and rate is required"); return; }
 
     setIsSaving(true);
     try {
@@ -201,7 +207,6 @@ const handleHSNReverseLookup = async (itemId: string, hsn: string) => {
         totalAmount: grandTotal,
       });
 
-      // Save line items
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
         const lineItems = validItems.map(item => {
@@ -248,12 +253,12 @@ const handleHSNReverseLookup = async (itemId: string, hsn: string) => {
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
 
-        {/* AI Scan */}
+        {/* AI Scan Button */}
         <TouchableOpacity style={[styles.scanCard, isExtracting && { opacity: 0.7 }]} onPress={handlePickImage} disabled={isExtracting} activeOpacity={0.8}>
           {isExtracting ? (
-            <><ActivityIndicator size="small" color={Colors.success} /><Text style={styles.scanTitle}>Extracting with AI...</Text></>
+            <><ActivityIndicator size="small" color={Colors.success} /><View style={{ marginLeft: 12 }}><Text style={styles.scanTitle}>Reading invoice with AI...</Text><Text style={styles.scanSubtitle}>Extracting all products and details</Text></View></>
           ) : (
-            <><View style={styles.scanIcon}><Ionicons name="camera" size={22} color={Colors.success} /></View><View><Text style={styles.scanTitle}>Scan Invoice with AI</Text><Text style={styles.scanSubtitle}>Auto-fills all fields including products</Text></View><Ionicons name="chevron-forward" size={18} color={Colors.textMuted} style={{ marginLeft: "auto" }} /></>
+            <><View style={styles.scanIcon}><Ionicons name="camera" size={22} color={Colors.success} /></View><View><Text style={styles.scanTitle}>📷 Scan Invoice with AI</Text><Text style={styles.scanSubtitle}>Works on handwritten + printed bills</Text></View><Ionicons name="chevron-forward" size={18} color={Colors.textMuted} style={{ marginLeft: "auto" }} /></>
           )}
         </TouchableOpacity>
 
@@ -285,7 +290,7 @@ const handleHSNReverseLookup = async (itemId: string, hsn: string) => {
           </View>
         </View>
 
-        {/* Line Items */}
+        {/* Products */}
         <Text style={styles.section}>Products / Items</Text>
         {items.map((item, index) => (
           <View key={item.id} style={styles.itemCard}>
@@ -298,18 +303,47 @@ const handleHSNReverseLookup = async (itemId: string, hsn: string) => {
               )}
             </View>
 
+            {/* HSN Code — enter to auto-fill product + GST */}
             <View style={styles.field}>
-              <Text style={styles.label}>Description *</Text>
+              <Text style={styles.label}>HSN Code → auto-fills product + GST rate</Text>
               <View style={styles.hsnRow}>
                 <TextInput
                   style={[styles.input, { flex: 1 }]}
-                  placeholder="e.g. Cement 50kg bags"
+                  placeholder="Type HSN code e.g. 2523"
+                  placeholderTextColor={Colors.textMuted}
+                  value={item.hsn}
+                  onChangeText={v => {
+                    updateItem(item.id, "hsn", v);
+                    if (v.length >= 4) handleHSNReverseLookup(item.id, v);
+                  }}
+                  keyboardType="numeric"
+                />
+                <TouchableOpacity
+                  style={styles.aiBtn}
+                  onPress={() => handleHSNReverseLookup(item.id, item.hsn)}
+                  disabled={hsnLoading === item.id}
+                >
+                  {hsnLoading === item.id
+                    ? <ActivityIndicator size="small" color="#fff" />
+                    : <Ionicons name="search" size={16} color="#fff" />
+                  }
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* Description */}
+            <View style={styles.field}>
+              <Text style={styles.label}>Product Description</Text>
+              <View style={styles.hsnRow}>
+                <TextInput
+                  style={[styles.input, { flex: 1 }]}
+                  placeholder="Auto-filled from HSN, or type product name"
                   placeholderTextColor={Colors.textMuted}
                   value={item.description}
                   onChangeText={v => updateItem(item.id, "description", v)}
                 />
                 <TouchableOpacity
-                  style={styles.aiBtn}
+                  style={[styles.aiBtn, { backgroundColor: "#7C3AED" }]}
                   onPress={() => handleHSNLookup(item.id, item.description)}
                   disabled={hsnLoading === item.id}
                 >
@@ -319,23 +353,17 @@ const handleHSNReverseLookup = async (itemId: string, hsn: string) => {
                   }
                 </TouchableOpacity>
               </View>
-              <Text style={styles.hintText}>Tap ✨ to auto-fill HSN code and GST rate</Text>
+              <Text style={styles.hintText}>🔍 Enter HSN above OR ✨ tap purple to find HSN from product name</Text>
             </View>
 
-            <View style={styles.row}>
-              <View style={[styles.field, { flex: 1 }]}>
-                <Text style={styles.label}>HSN Code</Text>
-                <TextInput style={styles.input} placeholder="e.g. 2523" placeholderTextColor={Colors.textMuted} value={item.hsn} onChangeText={v => updateItem(item.id, "hsn", v)} keyboardType="numeric" />
-              </View>
-              <View style={[styles.field, { flex: 1 }]}>
-                <Text style={styles.label}>GST Rate</Text>
-                <View style={styles.rateRow}>
-                  {GST_RATES.map(rate => (
-                    <TouchableOpacity key={rate} style={[styles.rateChip, item.gstRate === rate && styles.rateChipActive]} onPress={() => updateItem(item.id, "gstRate", rate)}>
-                      <Text style={[styles.rateChipText, item.gstRate === rate && styles.rateChipTextActive]}>{rate}%</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
+            <View style={styles.field}>
+              <Text style={styles.label}>GST Rate (auto-filled from HSN)</Text>
+              <View style={styles.rateRow}>
+                {GST_RATES.map(rate => (
+                  <TouchableOpacity key={rate} style={[styles.rateChip, item.gstRate === rate && styles.rateChipActive]} onPress={() => updateItem(item.id, "gstRate", rate)}>
+                    <Text style={[styles.rateChipText, item.gstRate === rate && styles.rateChipTextActive]}>{rate}%</Text>
+                  </TouchableOpacity>
+                ))}
               </View>
             </View>
 
@@ -362,7 +390,7 @@ const handleHSNReverseLookup = async (itemId: string, hsn: string) => {
 
         <TouchableOpacity style={styles.addItemBtn} onPress={addItem}>
           <Ionicons name="add-circle-outline" size={20} color={Colors.success} />
-          <Text style={[styles.addItemText, { color: Colors.success }]}>Add Another Product</Text>
+          <Text style={styles.addItemText}>Add Another Product</Text>
         </TouchableOpacity>
 
         {/* Grand Total */}
@@ -408,7 +436,7 @@ const styles = StyleSheet.create({
   row: { flexDirection: "row", gap: 12 },
   hsnRow: { flexDirection: "row", gap: 8 },
   aiBtn: { width: 46, height: 46, borderRadius: 10, backgroundColor: Colors.success, justifyContent: "center", alignItems: "center" },
-  hintText: { fontSize: 11, color: Colors.textMuted, marginTop: 4 },
+  hintText: { fontSize: 11, color: Colors.textMuted, marginTop: 4, lineHeight: 16 },
   itemCard: { backgroundColor: Colors.surface, borderRadius: 14, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: Colors.border },
   itemHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
   itemTitle: { fontSize: 14, fontFamily: "Inter_600SemiBold", color: Colors.textPrimary },
@@ -420,7 +448,7 @@ const styles = StyleSheet.create({
   rateChipText: { fontSize: 11, fontFamily: "Inter_600SemiBold", color: Colors.textSecondary },
   rateChipTextActive: { color: "#fff" },
   addItemBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, padding: 14, borderRadius: 12, borderWidth: 1.5, borderColor: Colors.success, borderStyle: "dashed", marginBottom: 16 },
-  addItemText: { fontSize: 14, fontFamily: "Inter_600SemiBold" },
+  addItemText: { fontSize: 14, fontFamily: "Inter_600SemiBold", color: Colors.success },
   summary: { backgroundColor: Colors.surface, borderRadius: 14, padding: 16, gap: 10, borderWidth: 1, borderColor: Colors.border },
   summaryTitle: { fontSize: 14, fontFamily: "Inter_700Bold", color: Colors.textPrimary, marginBottom: 4 },
   summaryRow: { flexDirection: "row", justifyContent: "space-between" },
