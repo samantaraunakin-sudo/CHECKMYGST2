@@ -9,36 +9,84 @@ import { router } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
 import * as Haptics from "expo-haptics";
 import * as FileSystem from "expo-file-system";
-import { useGST, getTodayDate } from "@/contexts/GSTContext";
+import { useGST, getTodayDate, generateId } from "@/contexts/GSTContext";
 import { getApiUrl } from "@/lib/query-client";
+import { supabase } from "@/lib/supabase";
 import Colors from "@/constants/colors";
 
 const GST_RATES = [0, 5, 12, 18, 28];
+
+interface LineItem {
+  id: string;
+  description: string;
+  hsn: string;
+  quantity: string;
+  rate: string;
+  gstRate: number;
+}
+
+function calcItem(item: LineItem) {
+  const qty = parseFloat(item.quantity || "0");
+  const rate = parseFloat(item.rate || "0");
+  const taxable = qty * rate;
+  const gst = taxable * (item.gstRate / 100);
+  return { taxable, gst, total: taxable + gst };
+}
 
 export default function AddPurchaseScreen() {
   const insets = useSafeAreaInsets();
   const { addPurchase } = useGST();
   const [isExtracting, setIsExtracting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [hsnQuery, setHsnQuery] = useState("");
-  const [hsnResult, setHsnResult] = useState("");
-  const [hsnLoading, setHsnLoading] = useState(false);
+  const [hsnLoading, setHsnLoading] = useState<string | null>(null);
 
   const [form, setForm] = useState({
     supplierName: "",
     supplierGSTIN: "",
     invoiceNumber: "",
     invoiceDate: getTodayDate(),
-    description: "",
-    hsn: "",
-    gstRate: 18,
-    taxableAmount: "",
   });
 
-  const gstAmount = parseFloat(form.taxableAmount || "0") * (form.gstRate / 100);
-  const totalAmount = parseFloat(form.taxableAmount || "0") + gstAmount;
+  const [items, setItems] = useState<LineItem[]>([
+    { id: generateId(), description: "", hsn: "", quantity: "", rate: "", gstRate: 18 },
+  ]);
 
-  const updateForm = (key: string, value: string | number) => setForm((p) => ({ ...p, [key]: value }));
+  const updateForm = (key: string, value: string) => setForm(p => ({ ...p, [key]: value }));
+
+  const updateItem = (id: string, key: keyof LineItem, value: string | number) => {
+    setItems(prev => prev.map(item => item.id === id ? { ...item, [key]: value } : item));
+  };
+
+  const addItem = () => {
+    setItems(prev => [...prev, { id: generateId(), description: "", hsn: "", quantity: "", rate: "", gstRate: 18 }]);
+  };
+
+  const removeItem = (id: string) => {
+    if (items.length === 1) return;
+    setItems(prev => prev.filter(item => item.id !== id));
+  };
+
+  const handleHSNLookup = async (itemId: string, query: string) => {
+    if (!query.trim()) return;
+    setHsnLoading(itemId);
+    try {
+      const url = new URL("/api/hsn-lookup", getApiUrl());
+      const res = await fetch(url.toString(), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: query.trim() }),
+      });
+      if (!res.ok) throw new Error("Lookup failed");
+      const data = await res.json();
+      if (data.hsn) updateItem(itemId, "hsn", data.hsn);
+      if (data.gstRate) updateItem(itemId, "gstRate", data.gstRate);
+      if (data.description) updateItem(itemId, "description", data.description);
+    } catch {
+      // silent fail
+    } finally {
+      setHsnLoading(null);
+    }
+  };
 
   const handlePickImage = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -53,7 +101,7 @@ export default function AddPurchaseScreen() {
     try {
       let base64 = asset.base64;
       if (!base64 && asset.uri) {
-        base64 = await FileSystem.readAsStringAsync(asset.uri, { encoding: FileSystem.EncodingType.Base64 });
+        base64 = await FileSystem.readAsStringAsync(asset.uri, { encoding: (FileSystem as any).EncodingType?.Base64 || "base64" });
       }
       const mimeType = asset.mimeType || "image/jpeg";
       const url = new URL("/api/extract-invoice", getApiUrl());
@@ -69,11 +117,26 @@ export default function AddPurchaseScreen() {
         supplierGSTIN: data.supplierGSTIN || "",
         invoiceNumber: data.invoiceNumber || "",
         invoiceDate: data.invoiceDate || getTodayDate(),
-        description: data.description || "",
-        hsn: data.hsn || "",
-        gstRate: data.gstRate || 18,
-        taxableAmount: data.taxableAmount ? String(data.taxableAmount) : "",
       });
+      if (data.items && Array.isArray(data.items) && data.items.length > 0) {
+        setItems(data.items.map((item: any) => ({
+          id: generateId(),
+          description: item.description || "",
+          hsn: item.hsn || "",
+          quantity: String(item.quantity || "1"),
+          rate: String(item.rate || item.taxableAmount || ""),
+          gstRate: item.gstRate || 18,
+        })));
+      } else if (data.taxableAmount) {
+        setItems([{
+          id: generateId(),
+          description: data.description || "",
+          hsn: data.hsn || "",
+          quantity: "1",
+          rate: String(data.taxableAmount || ""),
+          gstRate: data.gstRate || 18,
+        }]);
+      }
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch {
       Alert.alert("Extraction Failed", "Could not read the invoice. Please enter details manually.");
@@ -82,46 +145,56 @@ export default function AddPurchaseScreen() {
     }
   };
 
-  const handleHSNLookup = async () => {
-    if (!hsnQuery.trim()) return;
-    setHsnLoading(true);
-    setHsnResult("");
-    try {
-      const url = new URL("/api/hsn-lookup", getApiUrl());
-      const res = await fetch(url.toString(), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: hsnQuery.trim() }),
-      });
-      if (!res.ok) throw new Error("Lookup failed");
-      const data = await res.json();
-      setHsnResult(data.description || "No description found");
-      if (data.hsn) { updateForm("hsn", data.hsn); }
-    } catch {
-      setHsnResult("HSN lookup failed. Please check your connection.");
-    } finally {
-      setHsnLoading(false);
-    }
-  };
+  // Totals
+  const subtotal = items.reduce((sum, item) => sum + calcItem(item).taxable, 0);
+  const totalGST = items.reduce((sum, item) => sum + calcItem(item).gst, 0);
+  const totalBeforeRound = subtotal + totalGST;
+  const roundOff = Math.round(totalBeforeRound) - totalBeforeRound;
+  const grandTotal = totalBeforeRound + roundOff;
 
   const handleSave = async () => {
     if (!form.supplierName.trim()) { Alert.alert("Required", "Supplier name is required"); return; }
     if (!form.invoiceNumber.trim()) { Alert.alert("Required", "Invoice number is required"); return; }
-    if (!form.taxableAmount || parseFloat(form.taxableAmount) <= 0) { Alert.alert("Required", "Valid taxable amount is required"); return; }
+    const validItems = items.filter(i => i.description.trim() && parseFloat(i.quantity || "0") > 0 && parseFloat(i.rate || "0") > 0);
+    if (validItems.length === 0) { Alert.alert("Required", "At least one valid product with quantity and rate is required"); return; }
+
     setIsSaving(true);
     try {
-      await addPurchase({
+      const purchase = await addPurchase({
         supplierName: form.supplierName.trim(),
         supplierGSTIN: form.supplierGSTIN.trim(),
         invoiceNumber: form.invoiceNumber.trim(),
         invoiceDate: form.invoiceDate || getTodayDate(),
-        description: form.description.trim(),
-        hsn: form.hsn.trim(),
-        gstRate: form.gstRate,
-        taxableAmount: parseFloat(form.taxableAmount),
-        gstAmount,
-        totalAmount,
+        description: validItems.map(i => i.description).join(", "),
+        hsn: validItems[0].hsn,
+        gstRate: validItems[0].gstRate,
+        taxableAmount: subtotal,
+        gstAmount: totalGST,
+        totalAmount: grandTotal,
       });
+
+      // Save line items to Supabase
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const lineItems = validItems.map(item => {
+          const calc = calcItem(item);
+          return {
+            id: generateId(),
+            purchase_id: purchase.id,
+            user_id: user.id,
+            description: item.description,
+            hsn: item.hsn,
+            quantity: parseFloat(item.quantity),
+            rate: parseFloat(item.rate),
+            taxable_amount: calc.taxable,
+            gst_rate: item.gstRate,
+            gst_amount: calc.gst,
+            total_amount: calc.total,
+          };
+        });
+        await supabase.from("purchase_items").insert(lineItems);
+      }
+
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       router.back();
     } catch {
@@ -145,87 +218,143 @@ export default function AddPurchaseScreen() {
         </TouchableOpacity>
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={[styles.scrollContent, Platform.OS === "web" && { paddingBottom: 34 }]} keyboardShouldPersistTaps="handled">
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+
         {/* AI Scan */}
         <TouchableOpacity style={[styles.scanCard, isExtracting && { opacity: 0.7 }]} onPress={handlePickImage} disabled={isExtracting} activeOpacity={0.8}>
           {isExtracting ? (
-            <><ActivityIndicator size="small" color={Colors.primary} /><View><Text style={styles.scanTitle}>Extracting with AI...</Text><Text style={styles.scanSubtitle}>Please wait</Text></View></>
+            <><ActivityIndicator size="small" color={Colors.primary} /><Text style={styles.scanTitle}>Extracting with AI...</Text></>
           ) : (
-            <><View style={styles.scanIcon}><Ionicons name="camera" size={22} color={Colors.primary} /></View><View><Text style={styles.scanTitle}>Scan Invoice with AI</Text><Text style={styles.scanSubtitle}>Upload photo to auto-fill fields</Text></View><Ionicons name="chevron-forward" size={18} color={Colors.textMuted} style={{ marginLeft: "auto" }} /></>
+            <><View style={styles.scanIcon}><Ionicons name="camera" size={22} color={Colors.primary} /></View><View><Text style={styles.scanTitle}>Scan Invoice with AI</Text><Text style={styles.scanSubtitle}>Auto-fills all fields including products</Text></View><Ionicons name="chevron-forward" size={18} color={Colors.textMuted} style={{ marginLeft: "auto" }} /></>
           )}
         </TouchableOpacity>
 
         <View style={styles.divider}>
-          <View style={styles.divLine} />
-          <Text style={styles.divText}>or enter manually</Text>
-          <View style={styles.divLine} />
+          <View style={styles.divLine} /><Text style={styles.divText}>or enter manually</Text><View style={styles.divLine} />
         </View>
 
+        {/* Supplier Details */}
         <Text style={styles.section}>Supplier Details</Text>
         <View style={styles.field}>
           <Text style={styles.label}>Supplier Name *</Text>
-          <TextInput style={styles.input} placeholder="e.g. ABC Steel Co." placeholderTextColor={Colors.textMuted} value={form.supplierName} onChangeText={(v) => updateForm("supplierName", v)} />
+          <TextInput style={styles.input} placeholder="e.g. ABC Steel Co." placeholderTextColor={Colors.textMuted} value={form.supplierName} onChangeText={v => updateForm("supplierName", v)} />
         </View>
         <View style={styles.field}>
           <Text style={styles.label}>Supplier GSTIN</Text>
-          <TextInput style={styles.input} placeholder="e.g. 29ABCDE1234F1Z5" placeholderTextColor={Colors.textMuted} value={form.supplierGSTIN} onChangeText={(v) => updateForm("supplierGSTIN", v.toUpperCase())} autoCapitalize="characters" maxLength={15} />
+          <TextInput style={styles.input} placeholder="e.g. 29ABCDE1234F1Z5" placeholderTextColor={Colors.textMuted} value={form.supplierGSTIN} onChangeText={v => updateForm("supplierGSTIN", v.toUpperCase())} autoCapitalize="characters" maxLength={15} />
         </View>
 
+        {/* Invoice Details */}
         <Text style={styles.section}>Invoice Details</Text>
         <View style={styles.row}>
           <View style={[styles.field, { flex: 1 }]}>
             <Text style={styles.label}>Invoice Number *</Text>
-            <TextInput style={styles.input} placeholder="INV-001" placeholderTextColor={Colors.textMuted} value={form.invoiceNumber} onChangeText={(v) => updateForm("invoiceNumber", v)} />
+            <TextInput style={styles.input} placeholder="INV-001" placeholderTextColor={Colors.textMuted} value={form.invoiceNumber} onChangeText={v => updateForm("invoiceNumber", v)} />
           </View>
           <View style={[styles.field, { flex: 1 }]}>
             <Text style={styles.label}>Invoice Date</Text>
-            <TextInput style={styles.input} placeholder="DD/MM/YYYY" placeholderTextColor={Colors.textMuted} value={form.invoiceDate} onChangeText={(v) => updateForm("invoiceDate", v)} />
-          </View>
-        </View>
-        <View style={styles.field}>
-          <Text style={styles.label}>Product Description</Text>
-          <TextInput style={styles.input} placeholder="e.g. TMT Steel Bars 12mm" placeholderTextColor={Colors.textMuted} value={form.description} onChangeText={(v) => updateForm("description", v)} />
-        </View>
-
-        <Text style={styles.section}>GST Details</Text>
-        {/* HSN Finder */}
-        <View style={styles.hsnFinder}>
-          <Text style={styles.label}>HSN Finder (AI)</Text>
-          <View style={styles.hsnRow}>
-            <TextInput style={[styles.input, { flex: 1 }]} placeholder="Search product to find HSN..." placeholderTextColor={Colors.textMuted} value={hsnQuery} onChangeText={setHsnQuery} />
-            <TouchableOpacity style={styles.hsnBtn} onPress={handleHSNLookup} disabled={hsnLoading}>
-              {hsnLoading ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="sparkles" size={18} color="#fff" />}
-            </TouchableOpacity>
-          </View>
-          {hsnResult ? <Text style={styles.hsnResultText}>{hsnResult}</Text> : null}
-        </View>
-
-        <View style={styles.row}>
-          <View style={[styles.field, { flex: 1 }]}>
-            <Text style={styles.label}>HSN/SAC Code</Text>
-            <TextInput style={styles.input} placeholder="e.g. 7214" placeholderTextColor={Colors.textMuted} value={form.hsn} onChangeText={(v) => updateForm("hsn", v)} keyboardType="numeric" />
-          </View>
-          <View style={[styles.field, { flex: 1 }]}>
-            <Text style={styles.label}>Taxable Amount (₹) *</Text>
-            <TextInput style={styles.input} placeholder="0.00" placeholderTextColor={Colors.textMuted} value={form.taxableAmount} onChangeText={(v) => updateForm("taxableAmount", v)} keyboardType="numeric" />
-          </View>
-        </View>
-        <View style={styles.field}>
-          <Text style={styles.label}>GST Rate</Text>
-          <View style={styles.rateRow}>
-            {GST_RATES.map((rate) => (
-              <TouchableOpacity key={rate} style={[styles.rateChip, form.gstRate === rate && styles.rateChipActive]} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); updateForm("gstRate", rate); }}>
-                <Text style={[styles.rateChipText, form.gstRate === rate && styles.rateChipTextActive]}>{rate}%</Text>
-              </TouchableOpacity>
-            ))}
+            <TextInput style={styles.input} placeholder="DD/MM/YYYY" placeholderTextColor={Colors.textMuted} value={form.invoiceDate} onChangeText={v => updateForm("invoiceDate", v)} />
           </View>
         </View>
 
+        {/* Line Items */}
+        <Text style={styles.section}>Products / Items</Text>
+        {items.map((item, index) => (
+          <View key={item.id} style={styles.itemCard}>
+            <View style={styles.itemHeader}>
+              <Text style={styles.itemTitle}>Item {index + 1}</Text>
+              {items.length > 1 && (
+                <TouchableOpacity onPress={() => removeItem(item.id)}>
+                  <Ionicons name="trash-outline" size={18} color="#EF4444" />
+                </TouchableOpacity>
+              )}
+            </View>
+
+            <View style={styles.field}>
+              <Text style={styles.label}>Description *</Text>
+              <View style={styles.hsnRow}>
+                <TextInput
+                  style={[styles.input, { flex: 1 }]}
+                  placeholder="e.g. TMT Steel Bars 12mm"
+                  placeholderTextColor={Colors.textMuted}
+                  value={item.description}
+                  onChangeText={v => updateItem(item.id, "description", v)}
+                />
+                <TouchableOpacity
+                  style={styles.aiBtn}
+                  onPress={() => handleHSNLookup(item.id, item.description)}
+                  disabled={hsnLoading === item.id}
+                >
+                  {hsnLoading === item.id
+                    ? <ActivityIndicator size="small" color="#fff" />
+                    : <Ionicons name="sparkles" size={16} color="#fff" />
+                  }
+                </TouchableOpacity>
+              </View>
+              <Text style={styles.hintText}>Tap ✨ to auto-fill HSN code and GST rate</Text>
+            </View>
+
+            <View style={styles.row}>
+              <View style={[styles.field, { flex: 1 }]}>
+                <Text style={styles.label}>HSN Code</Text>
+                <TextInput style={styles.input} placeholder="e.g. 7214" placeholderTextColor={Colors.textMuted} value={item.hsn} onChangeText={v => updateItem(item.id, "hsn", v)} keyboardType="numeric" />
+              </View>
+              <View style={[styles.field, { flex: 1 }]}>
+                <Text style={styles.label}>GST Rate</Text>
+                <View style={styles.rateRow}>
+                  {GST_RATES.map(rate => (
+                    <TouchableOpacity key={rate} style={[styles.rateChip, item.gstRate === rate && styles.rateChipActive]} onPress={() => updateItem(item.id, "gstRate", rate)}>
+                      <Text style={[styles.rateChipText, item.gstRate === rate && styles.rateChipTextActive]}>{rate}%</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            </View>
+
+            <View style={styles.row}>
+              <View style={[styles.field, { flex: 1 }]}>
+                <Text style={styles.label}>Quantity *</Text>
+                <TextInput style={styles.input} placeholder="0" placeholderTextColor={Colors.textMuted} value={item.quantity} onChangeText={v => updateItem(item.id, "quantity", v)} keyboardType="numeric" />
+              </View>
+              <View style={[styles.field, { flex: 1 }]}>
+                <Text style={styles.label}>Rate per unit (₹) *</Text>
+                <TextInput style={styles.input} placeholder="0.00" placeholderTextColor={Colors.textMuted} value={item.rate} onChangeText={v => updateItem(item.id, "rate", v)} keyboardType="numeric" />
+              </View>
+            </View>
+
+            {/* Item Total */}
+            {parseFloat(item.quantity || "0") > 0 && parseFloat(item.rate || "0") > 0 && (
+              <View style={styles.itemSummary}>
+                <Text style={styles.itemSummaryText}>Taxable: ₹{calcItem(item).taxable.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</Text>
+                <Text style={styles.itemSummaryText}>GST: ₹{calcItem(item).gst.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</Text>
+                <Text style={[styles.itemSummaryText, { fontWeight: "700", color: Colors.primary }]}>Total: ₹{calcItem(item).total.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</Text>
+              </View>
+            )}
+          </View>
+        ))}
+
+        <TouchableOpacity style={styles.addItemBtn} onPress={addItem}>
+          <Ionicons name="add-circle-outline" size={20} color={Colors.primary} />
+          <Text style={styles.addItemText}>Add Another Product</Text>
+        </TouchableOpacity>
+
+        {/* Grand Total Summary */}
         <View style={styles.summary}>
-          <View style={styles.summaryRow}><Text style={styles.summaryLabel}>Taxable Amount</Text><Text style={styles.summaryValue}>₹{parseFloat(form.taxableAmount || "0").toLocaleString("en-IN")}</Text></View>
-          <View style={styles.summaryRow}><Text style={styles.summaryLabel}>GST ({form.gstRate}%)</Text><Text style={styles.summaryValue}>₹{gstAmount.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</Text></View>
-          <View style={[styles.summaryRow, styles.summaryTotal]}><Text style={styles.summaryTotalLabel}>Total Amount</Text><Text style={styles.summaryTotalValue}>₹{totalAmount.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</Text></View>
+          <Text style={styles.summaryTitle}>Invoice Summary</Text>
+          <View style={styles.summaryRow}><Text style={styles.summaryLabel}>Subtotal (Taxable)</Text><Text style={styles.summaryValue}>₹{subtotal.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</Text></View>
+          <View style={styles.summaryRow}><Text style={styles.summaryLabel}>Total GST</Text><Text style={styles.summaryValue}>₹{totalGST.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</Text></View>
+          {Math.abs(roundOff) > 0.001 && (
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>Round Off</Text>
+              <Text style={[styles.summaryValue, { color: roundOff > 0 ? "#22c55e" : "#EF4444" }]}>{roundOff > 0 ? "+" : ""}₹{roundOff.toFixed(2)}</Text>
+            </View>
+          )}
+          <View style={[styles.summaryRow, styles.summaryTotal]}>
+            <Text style={styles.summaryTotalLabel}>Grand Total</Text>
+            <Text style={styles.summaryTotalValue}>₹{grandTotal.toLocaleString("en-IN", { maximumFractionDigits: 0 })}</Text>
+          </View>
         </View>
+
       </ScrollView>
     </View>
   );
@@ -237,33 +366,40 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 16, fontFamily: "Inter_600SemiBold", color: Colors.textPrimary },
   saveBtn: { backgroundColor: Colors.primary, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 10 },
   saveBtnText: { fontSize: 14, fontFamily: "Inter_600SemiBold", color: "#fff" },
-  scrollContent: { padding: 16, gap: 4, paddingBottom: 60 },
+  scrollContent: { padding: 16, gap: 4, paddingBottom: 80 },
   scanCard: { flexDirection: "row", alignItems: "center", backgroundColor: Colors.surface, borderRadius: 14, padding: 16, gap: 12, borderWidth: 1.5, borderColor: Colors.primary, marginBottom: 4 },
   scanIcon: { width: 40, height: 40, borderRadius: 10, backgroundColor: "#EEF2FF", justifyContent: "center", alignItems: "center" },
   scanTitle: { fontSize: 14, fontFamily: "Inter_600SemiBold", color: Colors.textPrimary },
-  scanSubtitle: { fontSize: 12, fontFamily: "Inter_400Regular", color: Colors.textSecondary },
+  scanSubtitle: { fontSize: 12, color: Colors.textSecondary },
   divider: { flexDirection: "row", alignItems: "center", gap: 8, marginVertical: 12 },
   divLine: { flex: 1, height: 1, backgroundColor: Colors.border },
-  divText: { fontSize: 12, fontFamily: "Inter_400Regular", color: Colors.textMuted },
+  divText: { fontSize: 12, color: Colors.textMuted },
   section: { fontSize: 13, fontFamily: "Inter_600SemiBold", color: Colors.textSecondary, marginTop: 8, marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 },
   field: { marginBottom: 12 },
   label: { fontSize: 13, fontFamily: "Inter_500Medium", color: Colors.textSecondary, marginBottom: 6 },
-  input: { backgroundColor: Colors.surface, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, fontFamily: "Inter_400Regular", color: Colors.textPrimary, borderWidth: 1, borderColor: Colors.border },
+  input: { backgroundColor: Colors.surface, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, color: Colors.textPrimary, borderWidth: 1, borderColor: Colors.border },
   row: { flexDirection: "row", gap: 12 },
-  hsnFinder: { marginBottom: 12 },
   hsnRow: { flexDirection: "row", gap: 8 },
-  hsnBtn: { width: 46, height: 46, borderRadius: 10, backgroundColor: Colors.primary, justifyContent: "center", alignItems: "center" },
-  hsnResultText: { fontSize: 12, fontFamily: "Inter_400Regular", color: Colors.textSecondary, marginTop: 6, lineHeight: 16 },
-  rateRow: { flexDirection: "row", gap: 8 },
-  rateChip: { flex: 1, paddingVertical: 10, borderRadius: 10, backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border, alignItems: "center" },
+  aiBtn: { width: 46, height: 46, borderRadius: 10, backgroundColor: Colors.primary, justifyContent: "center", alignItems: "center" },
+  hintText: { fontSize: 11, color: Colors.textMuted, marginTop: 4 },
+  itemCard: { backgroundColor: Colors.surface, borderRadius: 14, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: Colors.border },
+  itemHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
+  itemTitle: { fontSize: 14, fontFamily: "Inter_600SemiBold", color: Colors.textPrimary },
+  itemSummary: { flexDirection: "row", justifyContent: "space-between", backgroundColor: "#F0F7FF", borderRadius: 8, padding: 10, marginTop: 4 },
+  itemSummaryText: { fontSize: 12, color: Colors.textSecondary },
+  rateRow: { flexDirection: "row", gap: 4 },
+  rateChip: { flex: 1, paddingVertical: 8, borderRadius: 8, backgroundColor: Colors.background, borderWidth: 1, borderColor: Colors.border, alignItems: "center" },
   rateChipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  rateChipText: { fontSize: 13, fontFamily: "Inter_600SemiBold", color: Colors.textSecondary },
+  rateChipText: { fontSize: 11, fontFamily: "Inter_600SemiBold", color: Colors.textSecondary },
   rateChipTextActive: { color: "#fff" },
-  summary: { backgroundColor: Colors.surface, borderRadius: 14, padding: 16, marginTop: 8, gap: 10, borderWidth: 1, borderColor: Colors.border },
+  addItemBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, padding: 14, borderRadius: 12, borderWidth: 1.5, borderColor: Colors.primary, borderStyle: "dashed", marginBottom: 16 },
+  addItemText: { fontSize: 14, fontFamily: "Inter_600SemiBold", color: Colors.primary },
+  summary: { backgroundColor: Colors.surface, borderRadius: 14, padding: 16, gap: 10, borderWidth: 1, borderColor: Colors.border },
+  summaryTitle: { fontSize: 14, fontFamily: "Inter_700Bold", color: Colors.textPrimary, marginBottom: 4 },
   summaryRow: { flexDirection: "row", justifyContent: "space-between" },
-  summaryLabel: { fontSize: 14, fontFamily: "Inter_400Regular", color: Colors.textSecondary },
+  summaryLabel: { fontSize: 14, color: Colors.textSecondary },
   summaryValue: { fontSize: 14, fontFamily: "Inter_500Medium", color: Colors.textPrimary },
-  summaryTotal: { borderTopWidth: 1, borderTopColor: Colors.border, paddingTop: 10 },
+  summaryTotal: { borderTopWidth: 1, borderTopColor: Colors.border, paddingTop: 10, marginTop: 4 },
   summaryTotalLabel: { fontSize: 15, fontFamily: "Inter_700Bold", color: Colors.textPrimary },
   summaryTotalValue: { fontSize: 16, fontFamily: "Inter_700Bold", color: Colors.primary },
 });
