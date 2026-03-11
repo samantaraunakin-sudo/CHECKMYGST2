@@ -1,33 +1,88 @@
-import { Tabs } from "expo-router";
-import { Platform, StyleSheet, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
-import React from "react";
-import Colors from "@/constants/colors";
+import {
+  Inter_400Regular,
+  Inter_500Medium,
+  Inter_600SemiBold,
+  Inter_700Bold,
+  useFonts,
+} from "@expo-google-fonts/inter";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { Stack, router } from "expo-router";
+import * as SplashScreen from "expo-splash-screen";
+import React, { useEffect, useState } from "react";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { KeyboardProvider } from "react-native-keyboard-controller";
+import { queryClient } from "@/lib/query-client";
+import { GSTProvider } from "@/contexts/GSTContext";
+import { supabase } from "@/lib/supabase";
+import { Session } from "@supabase/supabase-js";
 
-export default function TabLayout() {
-  const isWeb = Platform.OS === "web";
+SplashScreen.preventAutoHideAsync();
+
+function RootLayoutNav({ session }: { session: Session | null }) {
+  useEffect(() => {
+    if (session) {
+      router.replace("/(tabs)");
+    } else {
+      router.replace("/login");
+    }
+  }, [session]);
 
   return (
-    <Tabs
-      screenOptions={{
-        headerShown: false,
-        tabBarActiveTintColor: Colors.primary,
-        tabBarInactiveTintColor: Colors.tabIconDefault,
-        tabBarStyle: {
-          backgroundColor: "#fff",
-          borderTopWidth: 1,
-          borderTopColor: Colors.border,
-          elevation: 0,
-          ...(isWeb ? { height: 84 } : {}),
-        },
-      }}
-    >
-      <Tabs.Screen name="index" options={{ title: "Dashboard", tabBarIcon: ({ color, size }) => <Ionicons name="bar-chart" size={size} color={color} /> }} />
-      <Tabs.Screen name="purchases" options={{ title: "Purchases", tabBarIcon: ({ color, size }) => <Ionicons name="cloud-download-outline" size={size} color={color} /> }} />
-      <Tabs.Screen name="sales" options={{ title: "Sales", tabBarIcon: ({ color, size }) => <Ionicons name="cloud-upload-outline" size={size} color={color} /> }} />
-      <Tabs.Screen name="reconciliation" options={{ title: "Reconcile", tabBarIcon: ({ color, size }) => <Ionicons name="swap-horizontal" size={size} color={color} /> }} />
-      <Tabs.Screen name="clients" options={{ title: "Clients", tabBarIcon: ({ color, size }) => <Ionicons name="people" size={size} color={color} /> }} />
-      <Tabs.Screen name="profile" options={{ title: "Profile", tabBarIcon: ({ color, size }) => <Ionicons name="person-circle-outline" size={size} color={color} /> }} />
-    </Tabs>
+    <Stack screenOptions={{ headerBackTitle: "Back" }}>
+      <Stack.Screen name="login" options={{ headerShown: false }} />
+      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+      <Stack.Screen name="purchase/add" options={{ headerShown: false, presentation: "modal" }} />
+      <Stack.Screen name="sale/add" options={{ headerShown: false, presentation: "modal" }} />
+      <Stack.Screen name="gstr2b/upload" options={{ headerShown: false, presentation: "modal" }} />
+      <Stack.Screen name="supplier/edit" options={{ headerShown: false, presentation: "modal" }} />
+      <Stack.Screen name="customer/edit" options={{ headerShown: false, presentation: "modal" }} />
+      <Stack.Screen name="profile/edit" options={{ headerShown: false, presentation: "modal" }} />
+      <Stack.Screen name="search" options={{ headerShown: false }} />
+    </Stack>
+  );
+}
+
+export default function RootLayout() {
+  const [session, setSession] = useState<Session | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+
+  const [fontsLoaded, fontError] = useFonts({
+    Inter_400Regular,
+    Inter_500Medium,
+    Inter_600SemiBold,
+    Inter_700Bold,
+  });
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setAuthLoading(false);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if ((fontsLoaded || fontError) && !authLoading) {
+      SplashScreen.hideAsync();
+    }
+  }, [fontsLoaded, fontError, authLoading]);
+
+  if ((!fontsLoaded && !fontError) || authLoading) return null;
+
+  return (
+    <QueryClientProvider client={queryClient}>
+      <GSTProvider>
+        <GestureHandlerRootView style={{ flex: 1 }}>
+          <KeyboardProvider>
+            <RootLayoutNav session={session} />
+          </KeyboardProvider>
+        </GestureHandlerRootView>
+      </GSTProvider>
+    </QueryClientProvider>
   );
 }
