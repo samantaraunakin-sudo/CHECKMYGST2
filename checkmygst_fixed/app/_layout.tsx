@@ -1,93 +1,110 @@
-import {
-  Inter_400Regular,
-  Inter_500Medium,
-  Inter_600SemiBold,
-  Inter_700Bold,
-  useFonts,
-} from "@expo-google-fonts/inter";
-import { QueryClientProvider } from "@tanstack/react-query";
-import { Slot, Stack, router } from "expo-router";
-import * as SplashScreen from "expo-splash-screen";
-import React, { useEffect, useState } from "react";
-import { GestureHandlerRootView } from "react-native-gesture-handler";
-import { KeyboardProvider } from "react-native-keyboard-controller";
-import { ErrorBoundary } from "@/components/ErrorBoundary";
-import { queryClient } from "@/lib/query-client";
-import { GSTProvider } from "@/contexts/GSTContext";
-import { supabase } from "@/lib/supabase";
-import { Session } from "@supabase/supabase-js";
+import { isLiquidGlassAvailable } from "expo-glass-effect";
+import { Tabs } from "expo-router";
+import { BlurView } from "expo-blur";
+import { SymbolView } from "expo-symbols";
+import { Platform, StyleSheet, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import React from "react";
+import Colors from "@/constants/colors";
 
-SplashScreen.preventAutoHideAsync();
-
-function RootLayoutNav({ session }: { session: Session | null }) {
-  useEffect(() => {
-    if (session) {
-      router.replace("/(tabs)");
-    } else {
-      router.replace("/login");
-    }
-  }, [session]);
+export default function TabLayout() {
+  const isIOS = Platform.OS === "ios";
+  const isWeb = Platform.OS === "web";
 
   return (
-    <Stack screenOptions={{ headerBackTitle: "Back" }}>
-      <Stack.Screen name="login" options={{ headerShown: false }} />
-      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-      <Stack.Screen name="purchase/add" options={{ headerShown: false, presentation: "modal" }} />
-      <Stack.Screen name="sale/add" options={{ headerShown: false, presentation: "modal" }} />
-      <Stack.Screen name="gstr2b/upload" options={{ headerShown: false, presentation: "modal" }} />
-      <Stack.Screen name="supplier/edit" options={{ headerShown: false, presentation: "modal" }} />
-      <Stack.Screen name="customer/edit" options={{ headerShown: false, presentation: "modal" }} />
-      <Stack.Screen name="profile/edit" options={{ headerShown: false, presentation: "modal" }} />
-      <Stack.Screen name="search" options={{ headerShown: false }} />
-    </Stack>
-  );
-}
-
-export default function RootLayout() {
-  const [session, setSession] = useState<Session | null>(null);
-  const [authLoading, setAuthLoading] = useState(true);
-
-  const [fontsLoaded, fontError] = useFonts({
-    Inter_400Regular,
-    Inter_500Medium,
-    Inter_600SemiBold,
-    Inter_700Bold,
-  });
-
-  useEffect(() => {
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setAuthLoading(false);
-    });
-
-    // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
-
-  useEffect(() => {
-    if ((fontsLoaded || fontError) && !authLoading) {
-      SplashScreen.hideAsync();
-    }
-  }, [fontsLoaded, fontError, authLoading]);
-
-  if ((!fontsLoaded && !fontError) || authLoading) return null;
-
-  return (
-    <ErrorBoundary>
-      <QueryClientProvider client={queryClient}>
-        <GSTProvider>
-          <GestureHandlerRootView>
-            <KeyboardProvider>
-              <RootLayoutNav session={session} />
-            </KeyboardProvider>
-          </GestureHandlerRootView>
-        </GSTProvider>
-      </QueryClientProvider>
-    </ErrorBoundary>
+    <Tabs
+      screenOptions={{
+        headerShown: false,
+        tabBarActiveTintColor: Colors.primary,
+        tabBarInactiveTintColor: Colors.tabIconDefault,
+        tabBarStyle: {
+          position: "absolute",
+          backgroundColor: isIOS ? "transparent" : "#fff",
+          borderTopWidth: isWeb ? 1 : 0,
+          borderTopColor: Colors.border,
+          elevation: 0,
+          ...(isWeb ? { height: 84 } : {}),
+        },
+        tabBarBackground: () =>
+          isIOS ? (
+            <BlurView intensity={100} tint="light" style={StyleSheet.absoluteFill} />
+          ) : isWeb ? (
+            <View style={[StyleSheet.absoluteFill, { backgroundColor: "#fff" }]} />
+          ) : null,
+      }}
+    >
+      <Tabs.Screen
+        name="index"
+        options={{
+          title: "Dashboard",
+          tabBarIcon: ({ color, size }) =>
+            Platform.OS === "ios" ? (
+              <SymbolView name="chart.bar.fill" tintColor={color} size={size} />
+            ) : (
+              <Ionicons name="bar-chart" size={size} color={color} />
+            ),
+        }}
+      />
+      <Tabs.Screen
+        name="purchases"
+        options={{
+          title: "Purchases",
+          tabBarIcon: ({ color, size }) =>
+            Platform.OS === "ios" ? (
+              <SymbolView name="arrow.down.doc.fill" tintColor={color} size={size} />
+            ) : (
+              <Ionicons name="cloud-download-outline" size={size} color={color} />
+            ),
+        }}
+      />
+      <Tabs.Screen
+        name="sales"
+        options={{
+          title: "Sales",
+          tabBarIcon: ({ color, size }) =>
+            Platform.OS === "ios" ? (
+              <SymbolView name="arrow.up.doc.fill" tintColor={color} size={size} />
+            ) : (
+              <Ionicons name="cloud-upload-outline" size={size} color={color} />
+            ),
+        }}
+      />
+      <Tabs.Screen
+        name="reconciliation"
+        options={{
+          title: "Reconcile",
+          tabBarIcon: ({ color, size }) =>
+            Platform.OS === "ios" ? (
+              <SymbolView name="arrow.left.arrow.right" tintColor={color} size={size} />
+            ) : (
+              <Ionicons name="swap-horizontal" size={size} color={color} />
+            ),
+        }}
+      />
+      <Tabs.Screen
+        name="clients"
+        options={{
+          title: "Clients",
+          tabBarIcon: ({ color, size }) =>
+            Platform.OS === "ios" ? (
+              <SymbolView name="person.2.fill" tintColor={color} size={size} />
+            ) : (
+              <Ionicons name="people" size={size} color={color} />
+            ),
+        }}
+      />
+      <Tabs.Screen
+        name="profile"
+        options={{
+          title: "Profile",
+          tabBarIcon: ({ color, size }) =>
+            Platform.OS === "ios" ? (
+              <SymbolView name="person.circle.fill" tintColor={color} size={size} />
+            ) : (
+              <Ionicons name="person-circle-outline" size={size} color={color} />
+            ),
+        }}
+      />
+    </Tabs>
   );
 }

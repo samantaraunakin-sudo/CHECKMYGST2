@@ -8,6 +8,7 @@ import React, {
   ReactNode,
 } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { supabase } from "@/lib/supabase";
 
 export interface BusinessProfile {
   id: string;
@@ -104,13 +105,6 @@ export interface CustomerSummary {
   lastInvoiceDate: string;
 }
 
-const KEYS = {
-  PROFILE: "gst_profile",
-  PURCHASES: "gst_purchases",
-  SALES: "gst_sales",
-  GSTR2B: "gst_gstr2b",
-};
-
 export function generateId() {
   return Date.now().toString() + Math.random().toString(36).substr(2, 9);
 }
@@ -124,7 +118,6 @@ export function getTodayDate(): string {
 }
 
 export function parseInvoiceDate(dateStr: string): Date {
-  // Handles DD/MM/YYYY
   const parts = dateStr.split("/");
   if (parts.length === 3) {
     return new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
@@ -144,7 +137,7 @@ export function getMonthKey(dateStr: string): string {
 export function getMonthLabel(monthKey: string): string {
   if (monthKey === "Unknown") return "Unknown";
   const [year, month] = monthKey.split("-");
-  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
   return `${months[parseInt(month) - 1]} ${year}`;
 }
 
@@ -167,6 +160,7 @@ interface GSTContextValue {
   sales: SalesInvoice[];
   gstr2bEntries: GSTR2BEntry[];
   isLoaded: boolean;
+  currentUserEmail: string;
 
   saveProfile: (data: Omit<BusinessProfile, "id">) => Promise<void>;
 
@@ -199,111 +193,163 @@ interface GSTContextValue {
 const GSTContext = createContext<GSTContextValue | null>(null);
 
 export function GSTProvider({ children }: { children: ReactNode }) {
+  const [userId, setUserId] = useState<string | null>(null);
+  const [currentUserEmail, setCurrentUserEmail] = useState<string>("");
   const [profile, setProfile] = useState<BusinessProfile | null>(null);
   const [purchases, setPurchases] = useState<PurchaseInvoice[]>([]);
   const [sales, setSales] = useState<SalesInvoice[]>([]);
   const [gstr2bEntries, setGstr2bEntries] = useState<GSTR2BEntry[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
 
+  const getKeys = (uid: string) => ({
+    PROFILE: `${uid}_gst_profile`,
+    PURCHASES: `${uid}_gst_purchases`,
+    SALES: `${uid}_gst_sales`,
+    GSTR2B: `${uid}_gst_gstr2b`,
+  });
+
+  const loadUserData = useCallback(async (uid: string) => {
+    setIsLoaded(false);
+    const KEYS = getKeys(uid);
+    const [p, pur, s, g] = await Promise.all([
+      load<BusinessProfile | null>(KEYS.PROFILE, null),
+      load<PurchaseInvoice[]>(KEYS.PURCHASES, []),
+      load<SalesInvoice[]>(KEYS.SALES, []),
+      load<GSTR2BEntry[]>(KEYS.GSTR2B, []),
+    ]);
+    setProfile(p);
+    setPurchases(pur);
+    setSales(s);
+    setGstr2bEntries(g);
+    setIsLoaded(true);
+  }, []);
+
+  const clearUserData = useCallback(() => {
+    setProfile(null);
+    setPurchases([]);
+    setSales([]);
+    setGstr2bEntries([]);
+    setIsLoaded(false);
+    setUserId(null);
+    setCurrentUserEmail("");
+  }, []);
+
   useEffect(() => {
-    (async () => {
-      const [p, pur, s, g] = await Promise.all([
-        load<BusinessProfile | null>(KEYS.PROFILE, null),
-        load<PurchaseInvoice[]>(KEYS.PURCHASES, []),
-        load<SalesInvoice[]>(KEYS.SALES, []),
-        load<GSTR2BEntry[]>(KEYS.GSTR2B, []),
-      ]);
-      setProfile(p);
-      setPurchases(pur);
-      setSales(s);
-      setGstr2bEntries(g);
-      setIsLoaded(true);
-    })();
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        setUserId(session.user.id);
+        setCurrentUserEmail(session.user.email || "");
+        loadUserData(session.user.id);
+      }
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        setUserId(session.user.id);
+        setCurrentUserEmail(session.user.email || "");
+        loadUserData(session.user.id);
+      } else {
+        clearUserData();
+      }
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
   const saveProfile = useCallback(async (data: Omit<BusinessProfile, "id">) => {
+    if (!userId) return;
     const p: BusinessProfile = { ...data, id: profile?.id || generateId() };
     setProfile(p);
-    await save(KEYS.PROFILE, p);
-  }, [profile]);
+    await save(getKeys(userId).PROFILE, p);
+  }, [profile, userId]);
 
   const addPurchase = useCallback(async (data: Omit<PurchaseInvoice, "id" | "createdAt">): Promise<PurchaseInvoice> => {
+    if (!userId) throw new Error("Not logged in");
     const p: PurchaseInvoice = { ...data, id: generateId(), createdAt: new Date().toISOString() };
     const updated = [...purchases, p];
     setPurchases(updated);
-    await save(KEYS.PURCHASES, updated);
+    await save(getKeys(userId).PURCHASES, updated);
     return p;
-  }, [purchases]);
+  }, [purchases, userId]);
 
   const updatePurchase = useCallback(async (id: string, data: Partial<PurchaseInvoice>) => {
+    if (!userId) return;
     const updated = purchases.map((p) => (p.id === id ? { ...p, ...data } : p));
     setPurchases(updated);
-    await save(KEYS.PURCHASES, updated);
-  }, [purchases]);
+    await save(getKeys(userId).PURCHASES, updated);
+  }, [purchases, userId]);
 
   const deletePurchase = useCallback(async (id: string) => {
+    if (!userId) return;
     const updated = purchases.filter((p) => p.id !== id);
     setPurchases(updated);
-    await save(KEYS.PURCHASES, updated);
-  }, [purchases]);
+    await save(getKeys(userId).PURCHASES, updated);
+  }, [purchases, userId]);
 
   const updateSupplierAcrossPurchases = useCallback(async (
     oldKey: string,
     newData: { supplierName: string; supplierGSTIN: string }
   ) => {
+    if (!userId) return;
     const updated = purchases.map((p) => {
       const key = p.supplierGSTIN || p.supplierName;
       if (key === oldKey) return { ...p, supplierName: newData.supplierName, supplierGSTIN: newData.supplierGSTIN };
       return p;
     });
     setPurchases(updated);
-    await save(KEYS.PURCHASES, updated);
-  }, [purchases]);
+    await save(getKeys(userId).PURCHASES, updated);
+  }, [purchases, userId]);
 
   const addSale = useCallback(async (data: Omit<SalesInvoice, "id" | "createdAt">): Promise<SalesInvoice> => {
+    if (!userId) throw new Error("Not logged in");
     const s: SalesInvoice = { ...data, id: generateId(), createdAt: new Date().toISOString() };
     const updated = [...sales, s];
     setSales(updated);
-    await save(KEYS.SALES, updated);
+    await save(getKeys(userId).SALES, updated);
     return s;
-  }, [sales]);
+  }, [sales, userId]);
 
   const updateSale = useCallback(async (id: string, data: Partial<SalesInvoice>) => {
+    if (!userId) return;
     const updated = sales.map((s) => (s.id === id ? { ...s, ...data } : s));
     setSales(updated);
-    await save(KEYS.SALES, updated);
-  }, [sales]);
+    await save(getKeys(userId).SALES, updated);
+  }, [sales, userId]);
 
   const deleteSale = useCallback(async (id: string) => {
+    if (!userId) return;
     const updated = sales.filter((s) => s.id !== id);
     setSales(updated);
-    await save(KEYS.SALES, updated);
-  }, [sales]);
+    await save(getKeys(userId).SALES, updated);
+  }, [sales, userId]);
 
   const updateCustomerAcrossSales = useCallback(async (
     oldKey: string,
     newData: { customerName: string; customerGSTIN: string }
   ) => {
+    if (!userId) return;
     const updated = sales.map((s) => {
       const key = s.customerGSTIN || s.customerName;
       if (key === oldKey) return { ...s, customerName: newData.customerName, customerGSTIN: newData.customerGSTIN };
       return s;
     });
     setSales(updated);
-    await save(KEYS.SALES, updated);
-  }, [sales]);
+    await save(getKeys(userId).SALES, updated);
+  }, [sales, userId]);
 
   const addGSTR2BEntries = useCallback(async (entries: Omit<GSTR2BEntry, "id">[]) => {
+    if (!userId) return;
     const newEntries = entries.map((e) => ({ ...e, id: generateId() }));
     const updated = [...gstr2bEntries, ...newEntries];
     setGstr2bEntries(updated);
-    await save(KEYS.GSTR2B, updated);
-  }, [gstr2bEntries]);
+    await save(getKeys(userId).GSTR2B, updated);
+  }, [gstr2bEntries, userId]);
 
   const clearGSTR2B = useCallback(async () => {
+    if (!userId) return;
     setGstr2bEntries([]);
-    await save(KEYS.GSTR2B, []);
-  }, []);
+    await save(getKeys(userId).GSTR2B, []);
+  }, [userId]);
 
   const getSuppliers = useCallback((): SupplierSummary[] => {
     const map = new Map<string, SupplierSummary>();
@@ -369,7 +415,6 @@ export function GSTProvider({ children }: { children: ReactNode }) {
           g.supplierGSTIN.toLowerCase() === purchase.supplierGSTIN.toLowerCase() &&
           g.invoiceNumber.toLowerCase() === purchase.invoiceNumber.toLowerCase()
       );
-
       if (match) {
         matchedGSTR2BIds.add(match.id);
         const diff = Math.abs(purchase.gstAmount - match.totalITC);
@@ -438,7 +483,7 @@ export function GSTProvider({ children }: { children: ReactNode }) {
   }, [gstr2bEntries]);
 
   const value = useMemo<GSTContextValue>(() => ({
-    profile, purchases, sales, gstr2bEntries, isLoaded,
+    profile, purchases, sales, gstr2bEntries, isLoaded, currentUserEmail,
     saveProfile,
     addPurchase, updatePurchase, deletePurchase, updateSupplierAcrossPurchases,
     addSale, updateSale, deleteSale, updateCustomerAcrossSales,
@@ -446,7 +491,7 @@ export function GSTProvider({ children }: { children: ReactNode }) {
     getSuppliers, getCustomers,
     getReconciliation, getRiskLevel, getITCSummary,
   }), [
-    profile, purchases, sales, gstr2bEntries, isLoaded,
+    profile, purchases, sales, gstr2bEntries, isLoaded, currentUserEmail,
     saveProfile,
     addPurchase, updatePurchase, deletePurchase, updateSupplierAcrossPurchases,
     addSale, updateSale, deleteSale, updateCustomerAcrossSales,
