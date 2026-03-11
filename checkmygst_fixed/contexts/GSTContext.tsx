@@ -8,6 +8,16 @@ import React, {
   ReactNode,
 } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+export interface Client {
+  id: string;
+  businessName: string;
+  ownerName: string;
+  gstin: string;
+  phone: string;
+  email: string;
+  businessType: string;
+  createdAt: string;
+}
 import { supabase } from "@/lib/supabase";
 
 export interface BusinessProfile {
@@ -161,6 +171,10 @@ interface GSTContextValue {
   gstr2bEntries: GSTR2BEntry[];
   isLoaded: boolean;
   currentUserEmail: string;
+  clients: Client[];
+addClient: (data: Omit<Client, "id" | "createdAt">) => Promise<Client>;
+updateClient: (id: string, data: Partial<Client>) => Promise<void>;
+deleteClient: (id: string) => Promise<void>;
 
   saveProfile: (data: Omit<BusinessProfile, "id">) => Promise<void>;
 
@@ -200,27 +214,31 @@ export function GSTProvider({ children }: { children: ReactNode }) {
   const [sales, setSales] = useState<SalesInvoice[]>([]);
   const [gstr2bEntries, setGstr2bEntries] = useState<GSTR2BEntry[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
+  const [clients, setClients] = useState<Client[]>([]);
 
   const getKeys = (uid: string) => ({
     PROFILE: `${uid}_gst_profile`,
     PURCHASES: `${uid}_gst_purchases`,
     SALES: `${uid}_gst_sales`,
     GSTR2B: `${uid}_gst_gstr2b`,
+    CLIENTS: `${uid}_gst_clients`,
   });
 
   const loadUserData = useCallback(async (uid: string) => {
     setIsLoaded(false);
     const KEYS = getKeys(uid);
-    const [p, pur, s, g] = await Promise.all([
+    const [p, pur, s, g, cl] = await Promise.all([
       load<BusinessProfile | null>(KEYS.PROFILE, null),
       load<PurchaseInvoice[]>(KEYS.PURCHASES, []),
       load<SalesInvoice[]>(KEYS.SALES, []),
       load<GSTR2BEntry[]>(KEYS.GSTR2B, []),
+      load<Client[]>(KEYS.CLIENTS, []),
     ]);
     setProfile(p);
     setPurchases(pur);
     setSales(s);
     setGstr2bEntries(g);
+    setClients(cl);
     setIsLoaded(true);
   }, []);
 
@@ -229,6 +247,7 @@ export function GSTProvider({ children }: { children: ReactNode }) {
     setPurchases([]);
     setSales([]);
     setGstr2bEntries([]);
+    setClients([]);
     setIsLoaded(false);
     setUserId(null);
     setCurrentUserEmail("");
@@ -350,6 +369,29 @@ export function GSTProvider({ children }: { children: ReactNode }) {
     setGstr2bEntries([]);
     await save(getKeys(userId).GSTR2B, []);
   }, [userId]);
+
+  const addClient = useCallback(async (data: Omit<Client, "id" | "createdAt">): Promise<Client> => {
+  if (!userId) throw new Error("Not logged in");
+  const c: Client = { ...data, id: generateId(), createdAt: new Date().toISOString() };
+  const updated = [...clients, c];
+  setClients(updated);
+  await save(getKeys(userId).CLIENTS, updated);
+  return c;
+}, [clients, userId]);
+
+const updateClient = useCallback(async (id: string, data: Partial<Client>) => {
+  if (!userId) return;
+  const updated = clients.map((c) => (c.id === id ? { ...c, ...data } : c));
+  setClients(updated);
+  await save(getKeys(userId).CLIENTS, updated);
+}, [clients, userId]);
+
+const deleteClient = useCallback(async (id: string) => {
+  if (!userId) return;
+  const updated = clients.filter((c) => c.id !== id);
+  setClients(updated);
+  await save(getKeys(userId).CLIENTS, updated);
+}, [clients, userId]);
 
   const getSuppliers = useCallback((): SupplierSummary[] => {
     const map = new Map<string, SupplierSummary>();
@@ -483,19 +525,21 @@ export function GSTProvider({ children }: { children: ReactNode }) {
   }, [gstr2bEntries]);
 
   const value = useMemo<GSTContextValue>(() => ({
-    profile, purchases, sales, gstr2bEntries, isLoaded, currentUserEmail,
+    profile, purchases, sales, gstr2bEntries, isLoaded, currentUserEmail, clients,
     saveProfile,
     addPurchase, updatePurchase, deletePurchase, updateSupplierAcrossPurchases,
     addSale, updateSale, deleteSale, updateCustomerAcrossSales,
     addGSTR2BEntries, clearGSTR2B,
+    addClient, updateClient, deleteClient,
     getSuppliers, getCustomers,
     getReconciliation, getRiskLevel, getITCSummary,
   }), [
-    profile, purchases, sales, gstr2bEntries, isLoaded, currentUserEmail,
+    profile, purchases, sales, gstr2bEntries, isLoaded, currentUserEmail, clients,
     saveProfile,
     addPurchase, updatePurchase, deletePurchase, updateSupplierAcrossPurchases,
     addSale, updateSale, deleteSale, updateCustomerAcrossSales,
     addGSTR2BEntries, clearGSTR2B,
+    addClient, updateClient, deleteClient,
     getSuppliers, getCustomers,
     getReconciliation, getRiskLevel, getITCSummary,
   ]);
