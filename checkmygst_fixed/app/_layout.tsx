@@ -1,7 +1,5 @@
-import { isLiquidGlassAvailable } from "expo-glass-effect";
 import { Tabs } from "expo-router";
 import { BlurView } from "expo-blur";
-import { SymbolView } from "expo-symbols";
 import { Platform, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import React from "react";
@@ -37,72 +35,42 @@ export default function TabLayout() {
         name="index"
         options={{
           title: "Dashboard",
-          tabBarIcon: ({ color, size }) =>
-            Platform.OS === "ios" ? (
-              <SymbolView name="chart.bar.fill" tintColor={color} size={size} />
-            ) : (
-              <Ionicons name="bar-chart" size={size} color={color} />
-            ),
+          tabBarIcon: ({ color, size }) => <Ionicons name="bar-chart" size={size} color={color} />,
         }}
       />
       <Tabs.Screen
         name="purchases"
         options={{
           title: "Purchases",
-          tabBarIcon: ({ color, size }) =>
-            Platform.OS === "ios" ? (
-              <SymbolView name="arrow.down.doc.fill" tintColor={color} size={size} />
-            ) : (
-              <Ionicons name="cloud-download-outline" size={size} color={color} />
-            ),
+          tabBarIcon: ({ color, size }) => <Ionicons name="cloud-download-outline" size={size} color={color} />,
         }}
       />
       <Tabs.Screen
         name="sales"
         options={{
           title: "Sales",
-          tabBarIcon: ({ color, size }) =>
-            Platform.OS === "ios" ? (
-              <SymbolView name="arrow.up.doc.fill" tintColor={color} size={size} />
-            ) : (
-              <Ionicons name="cloud-upload-outline" size={size} color={color} />
-            ),
+          tabBarIcon: ({ color, size }) => <Ionicons name="cloud-upload-outline" size={size} color={color} />,
         }}
       />
       <Tabs.Screen
         name="reconciliation"
         options={{
           title: "Reconcile",
-          tabBarIcon: ({ color, size }) =>
-            Platform.OS === "ios" ? (
-              <SymbolView name="arrow.left.arrow.right" tintColor={color} size={size} />
-            ) : (
-              <Ionicons name="swap-horizontal" size={size} color={color} />
-            ),
+          tabBarIcon: ({ color, size }) => <Ionicons name="swap-horizontal" size={size} color={color} />,
         }}
       />
       <Tabs.Screen
         name="clients"
         options={{
           title: "Clients",
-          tabBarIcon: ({ color, size }) =>
-            Platform.OS === "ios" ? (
-              <SymbolView name="person.2.fill" tintColor={color} size={size} />
-            ) : (
-              <Ionicons name="people" size={size} color={color} />
-            ),
+          tabBarIcon: ({ color, size }) => <Ionicons name="people" size={size} color={color} />,
         }}
       />
       <Tabs.Screen
         name="profile"
         options={{
           title: "Profile",
-          tabBarIcon: ({ color, size }) =>
-            Platform.OS === "ios" ? (
-              <SymbolView name="person.circle.fill" tintColor={color} size={size} />
-            ) : (
-              <Ionicons name="person-circle-outline" size={size} color={color} />
-            ),
+          tabBarIcon: ({ color, size }) => <Ionicons name="person-circle-outline" size={size} color={color} />,
         }}
       />
     </Tabs>
