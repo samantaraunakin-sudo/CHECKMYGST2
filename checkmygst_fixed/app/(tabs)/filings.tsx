@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Platform, Alert, Modal
+  Platform, Modal
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
@@ -10,15 +10,13 @@ import Colors from "@/constants/colors";
 import * as Haptics from "expo-haptics";
 
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
-const SHORT_MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const RETURN_TYPES = ["GSTR-1", "GSTR-3B"];
 
 function getDueDate(year: number, month: number, returnType: string) {
-  // month is 0-indexed
   const nextMonth = month === 11 ? 0 : month + 1;
   const nextYear = month === 11 ? year + 1 : year;
   if (returnType === "GSTR-1") return new Date(nextYear, nextMonth, 11);
   if (returnType === "GSTR-3B") return new Date(nextYear, nextMonth, 20);
-  if (returnType === "GSTR-2B") return new Date(nextYear, nextMonth, 14); // available by 14th
   return new Date(nextYear, nextMonth, 20);
 }
 
@@ -45,39 +43,52 @@ function getStatusLabel(daysLeft: number, filed: boolean) {
   return `Due in ${daysLeft}d`;
 }
 
-const RETURN_TYPES = ["GSTR-1", "GSTR-3B"];
-
 export default function FilingsScreen() {
   const { profile, purchases, sales } = useGST();
   const now = new Date();
-  const [selectedYear, setSelectedYear] = useState(now.getFullYear());
+
+  // Selected periods — user can add/remove
+  const [selectedPeriods, setSelectedPeriods] = useState<{year: number, month: number}[]>([
+    { year: now.getFullYear(), month: now.getMonth() },
+  ]);
   const [filedStatus, setFiledStatus] = useState<Record<string, boolean>>({});
+  const [showPicker, setShowPicker] = useState(false);
+  const [pickerYear, setPickerYear] = useState(now.getFullYear());
   const [showInfo, setShowInfo] = useState(false);
 
-  // Generate last 6 months + next 2 months
-  const periods = useMemo(() => {
-    const result = [];
-    for (let i = -5; i <= 2; i++) {
-      const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
-      result.push({ year: d.getFullYear(), month: d.getMonth() });
+  const years = [now.getFullYear() - 1, now.getFullYear(), now.getFullYear() + 1];
+
+  const addPeriod = (year: number, month: number) => {
+    const exists = selectedPeriods.some(p => p.year === year && p.month === month);
+    if (!exists) {
+      setSelectedPeriods(prev => [...prev, { year, month }].sort((a, b) =>
+        b.year !== a.year ? b.year - a.year : b.month - a.month
+      ));
     }
-    return result.reverse();
-  }, []);
+    setShowPicker(false);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  };
+
+  const removePeriod = (year: number, month: number) => {
+    if (selectedPeriods.length === 1) return; // keep at least one
+    setSelectedPeriods(prev => prev.filter(p => !(p.year === year && p.month === month)));
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  };
 
   const getMonthStats = (year: number, month: number) => {
     const mm = String(month + 1).padStart(2, "0");
     const key = `${year}-${mm}`;
-    const getMonthKey = (dateStr: string) => {
+    const getKey = (dateStr: string) => {
       if (!dateStr) return "";
       const parts = dateStr.split("/");
       if (parts.length === 3) return `${parts[2]}-${parts[1]}`;
       return dateStr.substring(0, 7);
     };
-    const mp = (purchases as any[]).filter(p => getMonthKey(p.invoiceDate) === key);
-    const ms = (sales as any[]).filter(s => getMonthKey(s.invoiceDate) === key);
+    const mp = (purchases as any[]).filter(p => getKey(p.invoiceDate) === key);
+    const ms = (sales as any[]).filter(s => getKey(s.invoiceDate) === key);
     const salesGST = ms.reduce((s: number, x: any) => s + (x.gstAmount || 0), 0);
     const purchaseGST = mp.reduce((s: number, x: any) => s + (x.gstAmount || 0), 0);
-    return { purchases: mp.length, sales: ms.length, netGST: salesGST - purchaseGST, salesGST, purchaseGST };
+    return { purchases: mp.length, sales: ms.length, netGST: salesGST - purchaseGST };
   };
 
   const toggleFiled = (key: string) => {
@@ -85,10 +96,9 @@ export default function FilingsScreen() {
     setFiledStatus(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
-  // Count urgent filings
   const urgentCount = useMemo(() => {
     let count = 0;
-    periods.forEach(({ year, month }) => {
+    selectedPeriods.forEach(({ year, month }) => {
       RETURN_TYPES.forEach(rt => {
         const key = `${year}-${month}-${rt}`;
         const due = getDueDate(year, month, rt);
@@ -97,16 +107,16 @@ export default function FilingsScreen() {
       });
     });
     return count;
-  }, [periods, filedStatus]);
+  }, [selectedPeriods, filedStatus]);
 
   return (
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
         <View>
-          <Text style={styles.headerTitle}>GST Filing Tracker</Text>
+          <Text style={styles.headerTitle}>GST Filings</Text>
           <Text style={styles.headerSub}>
-            {profile?.gstin ? `GSTIN: ${profile.gstin}` : "Set GSTIN in Profile →"}
+            {profile?.gstin ? `GSTIN: ${profile.gstin}` : "Add GSTIN in Profile"}
           </Text>
         </View>
         <View style={styles.headerRight}>
@@ -123,38 +133,35 @@ export default function FilingsScreen() {
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
 
-        {/* GSTIN Warning */}
-        {!profile?.gstin && (
-          <TouchableOpacity style={styles.warningBanner} onPress={() => router.push("/(tabs)/profile" as any)}>
-            <Ionicons name="warning-outline" size={18} color="#d97706" />
-            <Text style={styles.warningText}>Add your GSTIN in Profile to get personalized reminders</Text>
-            <Ionicons name="chevron-forward" size={16} color="#d97706" />
-          </TouchableOpacity>
-        )}
-
         {/* Quick Actions */}
         <View style={styles.quickActions}>
           <TouchableOpacity style={styles.quickBtn} onPress={() => router.push("/gstr2b/upload" as any)}>
-            <Ionicons name="cloud-upload-outline" size={20} color={Colors.primary} />
+            <Ionicons name="cloud-upload-outline" size={18} color={Colors.primary} />
             <Text style={styles.quickBtnText}>Upload GSTR-2B</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.quickBtn} onPress={() => router.push("/(tabs)/reconciliation" as any)}>
-            <Ionicons name="git-compare-outline" size={20} color="#8b5cf6" />
-            <Text style={[styles.quickBtnText, { color: "#8b5cf6" }]}>Reconcile</Text>
-          </TouchableOpacity>
           <TouchableOpacity style={styles.quickBtn} onPress={() => router.push("/(tabs)/calculator" as any)}>
-            <Ionicons name="calculator-outline" size={20} color="#16a34a" />
-            <Text style={[styles.quickBtnText, { color: "#16a34a" }]}>Calculator</Text>
+            <Ionicons name="calculator-outline" size={18} color="#16a34a" />
+            <Text style={[styles.quickBtnText, { color: "#16a34a" }]}>GST Calculator</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.quickBtn} onPress={() => router.push("/(tabs)/reconciliation" as any)}>
+            <Ionicons name="git-compare-outline" size={18} color="#8b5cf6" />
+            <Text style={[styles.quickBtnText, { color: "#8b5cf6" }]}>Reconcile</Text>
           </TouchableOpacity>
         </View>
 
-        {/* Filing Calendar */}
-        {periods.map(({ year, month }) => {
+        {/* Add Period Button */}
+        <TouchableOpacity style={styles.addPeriodBtn} onPress={() => setShowPicker(true)}>
+          <Ionicons name="add-circle-outline" size={20} color={Colors.primary} />
+          <Text style={styles.addPeriodText}>Add Month to Track</Text>
+        </TouchableOpacity>
+
+        {/* Period Cards */}
+        {selectedPeriods.map(({ year, month }) => {
           const stats = getMonthStats(year, month);
           const isCurrentMonth = year === now.getFullYear() && month === now.getMonth();
-          const isFuture = new Date(year, month, 1) > new Date(now.getFullYear(), now.getMonth(), 1);
           return (
             <View key={`${year}-${month}`} style={[styles.monthBlock, isCurrentMonth && styles.monthBlockCurrent]}>
+              {/* Month Header */}
               <View style={styles.monthHeader}>
                 <View>
                   <Text style={styles.monthName}>
@@ -168,28 +175,28 @@ export default function FilingsScreen() {
                     </Text>
                   </Text>
                 </View>
-                {isFuture && (
-                  <View style={styles.futureBadge}>
-                    <Text style={styles.futureBadgeText}>Upcoming</Text>
-                  </View>
+                {!isCurrentMonth && (
+                  <TouchableOpacity onPress={() => removePeriod(year, month)} style={styles.removeBtn}>
+                    <Ionicons name="close" size={16} color="#9ca3af" />
+                  </TouchableOpacity>
                 )}
               </View>
 
-              {/* Returns */}
+              {/* Return Rows */}
               {RETURN_TYPES.map(rt => {
                 const key = `${year}-${month}-${rt}`;
                 const due = getDueDate(year, month, rt);
                 const daysLeft = getDaysLeft(due);
                 const filed = filedStatus[key] || false;
                 const statusColor = getStatusColor(daysLeft, filed);
-                const statusLabel = getStatusLabel(daysLeft, filed);
                 return (
                   <View key={rt} style={styles.returnRow}>
-                    <View style={[styles.returnIcon, { backgroundColor: filed ? "#f0fdf4" : daysLeft < 0 ? "#fef2f2" : daysLeft <= 7 ? "#fffbeb" : "#eff6ff" }]}>
+                    <View style={[styles.returnIcon, {
+                      backgroundColor: filed ? "#f0fdf4" : daysLeft < 0 ? "#fef2f2" : daysLeft <= 7 ? "#fffbeb" : "#eff6ff"
+                    }]}>
                       <Ionicons
                         name={filed ? "checkmark-circle" : daysLeft < 0 ? "close-circle" : daysLeft <= 7 ? "alarm" : "document-text-outline"}
-                        size={20}
-                        color={statusColor}
+                        size={20} color={statusColor}
                       />
                     </View>
                     <View style={styles.returnInfo}>
@@ -199,9 +206,14 @@ export default function FilingsScreen() {
                       </Text>
                     </View>
                     <View style={styles.returnRight}>
-                      <Text style={[styles.statusLabel, { color: statusColor }]}>{statusLabel}</Text>
+                      <Text style={[styles.statusLabel, { color: statusColor }]}>
+                        {getStatusLabel(daysLeft, filed)}
+                      </Text>
                       <TouchableOpacity
-                        style={[styles.filedBtn, { backgroundColor: filed ? "#f0fdf4" : "#f9fafb", borderColor: filed ? "#16a34a" : "#e5e7eb" }]}
+                        style={[styles.filedBtn, {
+                          backgroundColor: filed ? "#f0fdf4" : "#f9fafb",
+                          borderColor: filed ? "#16a34a" : "#e5e7eb"
+                        }]}
                         onPress={() => toggleFiled(key)}
                       >
                         <Text style={[styles.filedBtnText, { color: filed ? "#16a34a" : "#6b7280" }]}>
@@ -216,24 +228,62 @@ export default function FilingsScreen() {
           );
         })}
 
-        {/* Late Filing Penalty Info */}
+        {/* Penalty Info */}
         <View style={styles.penaltyCard}>
           <Text style={styles.penaltyTitle}>⚠️ Late Filing Penalties</Text>
-          <View style={styles.penaltyRow}>
-            <Text style={styles.penaltyLabel}>GSTR-1 late fee</Text>
-            <Text style={styles.penaltyValue}>₹50/day (nil return: ₹20/day)</Text>
-          </View>
-          <View style={styles.penaltyRow}>
-            <Text style={styles.penaltyLabel}>GSTR-3B late fee</Text>
-            <Text style={styles.penaltyValue}>₹50/day + 18% interest on tax</Text>
-          </View>
-          <View style={styles.penaltyRow}>
-            <Text style={styles.penaltyLabel}>Maximum penalty</Text>
-            <Text style={styles.penaltyValue}>₹10,000 per return</Text>
-          </View>
+          {[
+            { label: "GSTR-1 late fee", value: "₹50/day (nil return: ₹20/day)" },
+            { label: "GSTR-3B late fee", value: "₹50/day + 18% interest" },
+            { label: "Maximum penalty", value: "₹10,000 per return" },
+          ].map(p => (
+            <View key={p.label} style={styles.penaltyRow}>
+              <Text style={styles.penaltyLabel}>{p.label}</Text>
+              <Text style={styles.penaltyValue}>{p.value}</Text>
+            </View>
+          ))}
         </View>
 
       </ScrollView>
+
+      {/* Month Picker Modal */}
+      <Modal visible={showPicker} transparent animationType="slide">
+        <TouchableOpacity style={styles.modalOverlay} onPress={() => setShowPicker(false)} activeOpacity={1}>
+          <View style={styles.modalBox}>
+            <Text style={styles.modalTitle}>Select Month & Year</Text>
+            {/* Year selector */}
+            <View style={styles.yearRow}>
+              {years.map(y => (
+                <TouchableOpacity
+                  key={y}
+                  style={[styles.yearBtn, pickerYear === y && styles.yearBtnActive]}
+                  onPress={() => setPickerYear(y)}
+                >
+                  <Text style={[styles.yearBtnText, pickerYear === y && styles.yearBtnTextActive]}>{y}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            {/* Month grid */}
+            <View style={styles.monthGrid}>
+              {MONTHS.map((m, i) => {
+                const already = selectedPeriods.some(p => p.year === pickerYear && p.month === i);
+                return (
+                  <TouchableOpacity
+                    key={m}
+                    style={[styles.monthItem, already && styles.monthItemAdded]}
+                    onPress={() => !already && addPeriod(pickerYear, i)}
+                    disabled={already}
+                  >
+                    <Text style={[styles.monthItemText, already && styles.monthItemAddedText]}>
+                      {m.substring(0, 3)}
+                    </Text>
+                    {already && <Text style={styles.monthItemAddedText}>✓</Text>}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Modal>
 
       {/* Info Modal */}
       <Modal visible={showInfo} transparent animationType="slide">
@@ -241,20 +291,20 @@ export default function FilingsScreen() {
           <View style={styles.modalBox}>
             <Text style={styles.modalTitle}>GST Return Due Dates</Text>
             {[
-              { name: "GSTR-1", desc: "Outward supplies (your sales)", due: "11th of next month" },
-              { name: "GSTR-2B", desc: "Auto-drafted ITC statement", due: "Available by 14th" },
-              { name: "GSTR-3B", desc: "Monthly summary return", due: "20th of next month" },
+              { name: "GSTR-1", desc: "Outward supplies — your sales", due: "11th of next month" },
+              { name: "GSTR-2B", desc: "Auto-drafted ITC from purchases", due: "Available by 14th" },
+              { name: "GSTR-3B", desc: "Monthly summary return + tax payment", due: "20th of next month" },
             ].map(r => (
-              <View key={r.name} style={styles.modalRow}>
-                <View style={styles.modalRowLeft}>
-                  <Text style={styles.modalReturnName}>{r.name}</Text>
-                  <Text style={styles.modalReturnDesc}>{r.desc}</Text>
+              <View key={r.name} style={styles.infoRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.infoName}>{r.name}</Text>
+                  <Text style={styles.infoDesc}>{r.desc}</Text>
                 </View>
-                <Text style={styles.modalDue}>{r.due}</Text>
+                <Text style={styles.infoDue}>{r.due}</Text>
               </View>
             ))}
             <TouchableOpacity style={styles.modalClose} onPress={() => setShowInfo(false)}>
-              <Text style={styles.modalCloseText}>Close</Text>
+              <Text style={styles.modalCloseText}>Got it</Text>
             </TouchableOpacity>
           </View>
         </TouchableOpacity>
@@ -273,19 +323,18 @@ const styles = StyleSheet.create({
   urgentBadgeText: { fontSize: 12, fontWeight: "700", color: "#dc2626" },
   infoBtn: { padding: 4 },
   scroll: { padding: 16, paddingBottom: 40 },
-  warningBanner: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#fffbeb", borderRadius: 10, padding: 12, marginBottom: 16, borderWidth: 1, borderColor: "#fde68a" },
-  warningText: { flex: 1, fontSize: 13, color: "#92400e" },
-  quickActions: { flexDirection: "row", gap: 8, marginBottom: 16 },
-  quickBtn: { flex: 1, backgroundColor: "#fff", borderRadius: 12, padding: 12, alignItems: "center", gap: 6, borderWidth: 1, borderColor: "#e5e7eb" },
-  quickBtnText: { fontSize: 12, fontWeight: "600", color: Colors.primary },
+  quickActions: { flexDirection: "row", gap: 8, marginBottom: 12 },
+  quickBtn: { flex: 1, backgroundColor: "#fff", borderRadius: 12, padding: 10, alignItems: "center", gap: 4, borderWidth: 1, borderColor: "#e5e7eb" },
+  quickBtnText: { fontSize: 11, fontWeight: "600", color: Colors.primary, textAlign: "center" },
+  addPeriodBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: "#eff6ff", borderRadius: 12, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: "#bfdbfe", borderStyle: "dashed" },
+  addPeriodText: { fontSize: 14, fontWeight: "600", color: Colors.primary },
   monthBlock: { backgroundColor: "#fff", borderRadius: 16, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: "#e5e7eb" },
   monthBlockCurrent: { borderColor: Colors.primary, borderWidth: 2 },
   monthHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 },
   monthName: { fontSize: 16, fontWeight: "700", color: "#111827" },
-  currentTag: { fontSize: 13, color: Colors.primary, fontWeight: "600" },
+  currentTag: { color: Colors.primary, fontWeight: "600" },
   monthStats: { fontSize: 12, color: "#6b7280", marginTop: 2 },
-  futureBadge: { backgroundColor: "#eff6ff", paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
-  futureBadgeText: { fontSize: 11, color: "#2563eb", fontWeight: "600" },
+  removeBtn: { padding: 4, backgroundColor: "#f3f4f6", borderRadius: 8 },
   returnRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10, borderTopWidth: 1, borderTopColor: "#f3f4f6" },
   returnIcon: { width: 40, height: 40, borderRadius: 10, justifyContent: "center", alignItems: "center" },
   returnInfo: { flex: 1 },
@@ -303,11 +352,20 @@ const styles = StyleSheet.create({
   modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
   modalBox: { backgroundColor: "#fff", borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24 },
   modalTitle: { fontSize: 18, fontWeight: "700", textAlign: "center", marginBottom: 20, color: "#111827" },
-  modalRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", paddingVertical: 12, borderTopWidth: 1, borderTopColor: "#f3f4f6" },
-  modalRowLeft: { flex: 1 },
-  modalReturnName: { fontSize: 15, fontWeight: "700", color: "#111827" },
-  modalReturnDesc: { fontSize: 12, color: "#6b7280", marginTop: 2 },
-  modalDue: { fontSize: 12, fontWeight: "600", color: Colors.primary, textAlign: "right" },
+  yearRow: { flexDirection: "row", justifyContent: "center", gap: 12, marginBottom: 20 },
+  yearBtn: { paddingHorizontal: 20, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: "#e5e7eb" },
+  yearBtnActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  yearBtnText: { fontSize: 14, color: "#374151" },
+  yearBtnTextActive: { color: "#fff", fontWeight: "700" },
+  monthGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  monthItem: { width: "22%", paddingVertical: 12, alignItems: "center", borderRadius: 10, borderWidth: 1, borderColor: "#e5e7eb" },
+  monthItemAdded: { backgroundColor: "#f0fdf4", borderColor: "#16a34a" },
+  monthItemText: { fontSize: 13, color: "#374151" },
+  monthItemAddedText: { fontSize: 11, color: "#16a34a", fontWeight: "700" },
+  infoRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", paddingVertical: 12, borderTopWidth: 1, borderTopColor: "#f3f4f6" },
+  infoName: { fontSize: 15, fontWeight: "700", color: "#111827" },
+  infoDesc: { fontSize: 12, color: "#6b7280", marginTop: 2 },
+  infoDue: { fontSize: 12, fontWeight: "600", color: Colors.primary, textAlign: "right" },
   modalClose: { backgroundColor: Colors.primary, borderRadius: 12, padding: 14, marginTop: 20, alignItems: "center" },
   modalCloseText: { color: "#fff", fontWeight: "700", fontSize: 15 },
 });
