@@ -14,7 +14,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "imageBase64 is required" });
       }
 
-      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+      const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
       const result = await model.generateContent([
         {
@@ -94,7 +94,7 @@ RULES:
       const { query } = req.body;
       if (!query) return res.status(400).json({ error: "query is required" });
 
-      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+      const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
       const result = await model.generateContent(
         `You are an Indian GST HSN/SAC code expert.
 
@@ -127,7 +127,7 @@ Examples: TMT steel bars → hsn 7214 gstRate 18, Cement → hsn 2523 gstRate 28
       const { hsn } = req.body;
       if (!hsn) return res.status(400).json({ error: "hsn is required" });
 
-      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+      const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
       const result = await model.generateContent(
         `You are an Indian GST HSN/SAC code expert.
 
@@ -158,7 +158,7 @@ Return ONLY this JSON — no explanation, no markdown, no backticks:
       const { text } = req.body;
       if (!text) return res.status(400).json({ error: "text is required" });
 
-      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+      const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
       const result = await model.generateContent(
         `Extract all B2B invoice entries from this GSTR-2B data:
 
