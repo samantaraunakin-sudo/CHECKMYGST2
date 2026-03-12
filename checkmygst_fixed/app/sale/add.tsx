@@ -138,11 +138,7 @@ export default function AddSaleScreen() {
     await handleProcessImage(result.assets[0]);
   };
 
-  const processInvoiceAsset = async (asset: any) => {
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.8, base64: true });
-    if (result.canceled || !result.assets[0]) return;
-    processInvoiceAsset(result.assets[0]);
-  };
+
 
   const handlePickImage = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -159,9 +155,9 @@ export default function AddSaleScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setIsExtracting(true);
     try {
-      let base64 = assetObj.base64;
-      if (!base64 && assetObj.uri) {
-        base64 = await FileSystem.readAsStringAsync(assetObj.uri, { encoding: (FileSystem as any).EncodingType?.Base64 || "base64" });
+      let base64 = asset.base64;
+      if (!base64 && asset.uri) {
+        base64 = await FileSystem.readAsStringAsync(asset.uri, { encoding: (FileSystem as any).EncodingType?.Base64 || "base64" });
       }
       const mimeType = assetObj.mimeType || "image/jpeg";
       const url = new URL("/api/extract-invoice", getApiUrl());

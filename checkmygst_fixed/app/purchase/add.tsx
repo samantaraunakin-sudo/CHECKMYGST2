@@ -121,21 +121,6 @@ export default function AddPurchaseScreen() {
   };
 
   // Scan invoice photo → auto-fill everything
-  const handleScanWithCamera = async () => {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permission needed", "Please allow camera access to scan invoices.");
-      return;
-    }
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ["images"],
-      quality: 0.8,
-      base64: true,
-    });
-    if (result.canceled || !result.assets[0]) return;
-    await processImage(result.assets[0]);
-  };
-
   const handleTakePhoto = async () => {
     try {
       const perm = await ImagePicker.requestCameraPermissionsAsync();
@@ -146,35 +131,24 @@ export default function AddPurchaseScreen() {
     } catch {}
     const result = await ImagePicker.launchCameraAsync({ mediaTypes: ["images"], quality: 0.8, base64: true });
     if (result.canceled || !result.assets[0]) return;
-    processInvoiceAsset(result.assets[0]);
-  };
-
-  const processInvoiceAsset = async (asset: any) => {
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.8, base64: true });
-    if (result.canceled || !result.assets[0]) return;
-    processInvoiceAsset(result.assets[0]);
+    await processInvoiceImage(result.assets[0]);
   };
 
   const handlePickImage = async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"],
-      quality: 0.8,
-      base64: true,
-    });
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.8, base64: true });
     if (result.canceled || !result.assets[0]) return;
-    await processImage(result.assets[0]);
+    await processInvoiceImage(result.assets[0]);
   };
 
-  const processImage = async (asset: any) => {
-    const assetData = asset;
+  const processInvoiceImage = async (asset: any) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setIsExtracting(true);
     try {
-      let base64 = assetObj.base64;
-      if (!base64 && assetObj.uri) {
-        base64 = await FileSystem.readAsStringAsync(assetObj.uri, { encoding: (FileSystem as any).EncodingType?.Base64 || "base64" });
+      let base64 = asset.base64;
+      if (!base64 && asset.uri) {
+        base64 = await FileSystem.readAsStringAsync(asset.uri, { encoding: (FileSystem as any).EncodingType?.Base64 || "base64" });
       }
-      const mimeType = assetData.mimeType || "image/jpeg";
+      const mimeType = asset.mimeType || "image/jpeg";
       const url = new URL("/api/extract-invoice", getApiUrl());
       const res = await fetch(url.toString(), {
         method: "POST",
@@ -183,14 +157,12 @@ export default function AddPurchaseScreen() {
       });
       if (!res.ok) throw new Error("Extraction failed");
       const data = await res.json();
-
       setForm({
         supplierName: data.supplierName || "",
         supplierGSTIN: data.supplierGSTIN || "",
         invoiceNumber: data.invoiceNumber || "",
         invoiceDate: data.invoiceDate || getTodayDate(),
       });
-
       if (data.items && Array.isArray(data.items) && data.items.length > 0) {
         setItems(data.items.map((item: any) => ({
           id: generateId(),
@@ -200,19 +172,10 @@ export default function AddPurchaseScreen() {
           rate: String(item.rate || item.taxableAmount || ""),
           gstRate: item.gstRate || 18,
         })));
-      } else if (data.taxableAmount) {
-        setItems([{
-          id: generateId(),
-          description: data.description || "",
-          hsn: data.hsn || "",
-          quantity: "1",
-          rate: String(data.taxableAmount || ""),
-          gstRate: data.gstRate || 18,
-        }]);
       }
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch {
-      Alert.alert("Extraction Failed", "Could not read the invoice. Please enter details manually.");
+      Alert.alert("Scan Failed", "Could not read the invoice. Please try again or enter details manually.");
     } finally {
       setIsExtracting(false);
     }
