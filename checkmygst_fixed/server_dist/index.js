@@ -15,7 +15,7 @@ async function registerRoutes(app2) {
         return res.status(400).json({ error: "imageBase64 is required" });
       }
       const response = await anthropic.messages.create({
-        model: "claude-haiku-4-5",
+        model: "claude-haiku-4-5-20251001",
         max_tokens: 8192,
         messages: [
           {
@@ -106,7 +106,7 @@ IMPORTANT RULES:
         return res.status(400).json({ error: "query is required" });
       }
       const response = await anthropic.messages.create({
-        model: "claude-haiku-4-5",
+        model: "claude-haiku-4-5-20251001",
         max_tokens: 1024,
         messages: [
           {
@@ -157,7 +157,7 @@ Return ONLY valid JSON, no explanation.`
         return res.status(400).json({ error: "hsn is required" });
       }
       const response = await anthropic.messages.create({
-        model: "claude-haiku-4-5",
+        model: "claude-haiku-4-5-20251001",
         max_tokens: 512,
         messages: [
           {
@@ -199,7 +199,7 @@ Return ONLY valid JSON, no explanation.`
         return res.status(400).json({ error: "text is required" });
       }
       const response = await anthropic.messages.create({
-        model: "claude-haiku-4-5",
+        model: "claude-haiku-4-5-20251001",
         max_tokens: 8192,
         messages: [
           {
