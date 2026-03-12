@@ -6,36 +6,34 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
 
 export async function registerRoutes(app: Express): Promise<Server> {
 
-  // AI Invoice Extraction from image
+  // AI Invoice Extraction from image — uses Groq (free, 14400/day, no limits)
   app.post("/api/extract-invoice", async (req, res) => {
     try {
       const { imageBase64, mimeType } = req.body;
-      if (!imageBase64) {
-        return res.status(400).json({ error: "imageBase64 is required" });
-      }
-
-      const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
-
-      const result = await model.generateContent([
-        {
-          inlineData: {
-            mimeType: mimeType || "image/jpeg",
-            data: imageBase64,
-          },
-        },
-        `You are an expert at reading Indian GST invoices — including handwritten, printed, and messy bills in Hindi or English.
-
-Extract ALL details from this invoice image. Return ONLY this exact JSON format, nothing else:
-
+      if (!imageBase64) return res.status(400).json({ error: "imageBase64 is required" });
+      const chatCompletion = await groq.chat.completions.create({
+        model: "meta-llama/llama-4-scout-17b-16e-instruct",
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "image_url",
+                image_url: { url: `data:${mimeType || "image/jpeg"};base64,${imageBase64}` }
+              },
+              {
+                type: "text",
+                text: `You are an expert at reading Indian GST invoices including handwritten and printed bills in Hindi or English.
+Extract ALL details from this invoice image. Return ONLY valid JSON, no explanation, no markdown:
 {
-  "supplierName": "string — business name of the seller",
-  "supplierGSTIN": "string — 15-character GSTIN of seller",
-  "invoiceNumber": "string — invoice/bill number",
-  "invoiceDate": "string — date in DD/MM/YYYY format",
+  "supplierName": "business name of seller",
+  "supplierGSTIN": "15-character GSTIN or empty string",
+  "invoiceNumber": "invoice/bill number",
+  "invoiceDate": "date in DD/MM/YYYY format",
   "items": [
     {
-      "description": "string — product or service name",
-      "hsn": "string — HSN or SAC code if visible",
+      "description": "product or service name",
+      "hsn": "HSN or SAC code if visible else empty string",
       "quantity": 1,
       "rate": 0,
       "gstRate": 18,
@@ -49,39 +47,19 @@ Extract ALL details from this invoice image. Return ONLY this exact JSON format,
   "roundOff": 0,
   "grandTotal": 0
 }
-
-RULES:
-- Extract EVERY line item separately
-- If quantity not shown, use 1
-- If rate not shown but taxable amount is, use taxableAmount as rate with quantity 1
-- HSN codes are 4-8 digit numbers
-- GSTIN is always 15 characters
-- If field not visible, use "" for strings and 0 for numbers
-- Return ONLY valid JSON — no explanation, no markdown, no backticks`,
-      ]);
-
-      const text = result.response.text().replace(/```json|```/g, "").trim();
+If any field is not visible, use empty string for text or 0 for numbers. For gstRate use only: 0, 5, 12, 18, or 28.`
+              }
+            ]
+          }
+        ],
+        max_tokens: 2000,
+        temperature: 0.1,
+      });
+      const text = chatCompletion.choices[0]?.message?.content || "";
       const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        return res.status(422).json({ error: "Could not extract invoice data" });
-      }
-
-      const invoiceData = JSON.parse(jsonMatch[0]);
-
-      if (!invoiceData.items || !Array.isArray(invoiceData.items)) {
-        invoiceData.items = [{
-          description: invoiceData.description || "",
-          hsn: invoiceData.hsn || "",
-          quantity: 1,
-          rate: invoiceData.taxableAmount || 0,
-          gstRate: invoiceData.gstRate || 18,
-          taxableAmount: invoiceData.taxableAmount || 0,
-          gstAmount: invoiceData.gstAmount || 0,
-          totalAmount: invoiceData.totalAmount || 0,
-        }];
-      }
-
-      res.json(invoiceData);
+      if (!jsonMatch) return res.status(422).json({ error: "Could not extract invoice data" });
+      const data = JSON.parse(jsonMatch[0]);
+      res.json(data);
     } catch (error) {
       console.error("Invoice extraction error:", error);
       res.status(500).json({ error: "Failed to extract invoice data", detail: String(error) });
