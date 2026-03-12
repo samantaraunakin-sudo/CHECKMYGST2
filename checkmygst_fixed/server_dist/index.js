@@ -77,7 +77,7 @@ RULES:
       res.json(invoiceData);
     } catch (error) {
       console.error("Invoice extraction error:", error);
-      res.status(500).json({ error: "Failed to extract invoice data" });
+      res.status(500).json({ error: "Failed to extract invoice data", detail: String(error) });
     }
   });
   const HSN_DB = {
