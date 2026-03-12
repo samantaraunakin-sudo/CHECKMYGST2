@@ -1,4 +1,4 @@
-import GSTSummary from "../../../components/GSTSummary";
+import GSTSummary from "../../components/GSTSummary";
 import React, { useState, useEffect } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform, Share,
@@ -83,7 +83,7 @@ export default function DashboardScreen() {
         contentContainerStyle={[styles.scroll, Platform.OS === "web" && { paddingBottom: 34 + 84 }]}
       >
         <GSTSummary />
-        
+
         {/* Today Card */}
         <LinearGradient colors={["#0A1628", "#0D7377"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.todayCard}>
           <View style={styles.todayHeader}>
