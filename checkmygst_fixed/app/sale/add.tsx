@@ -121,6 +121,29 @@ export default function AddSaleScreen() {
   };
 
   // Scan invoice photo → auto-fill everything
+  const handleTakePhoto = async () => {
+    try {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert("Camera Permission", "Please allow camera access in your browser/device settings.");
+        return;
+      }
+    } catch {}
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ["images"],
+      quality: 0.8,
+      base64: true,
+    });
+    if (result.canceled || !result.assets[0]) return;
+    await handleProcessImage(result.assets[0]);
+  };
+
+  const processInvoiceAsset = async (asset: any) => {
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.8, base64: true });
+    if (result.canceled || !result.assets[0]) return;
+    processInvoiceAsset(result.assets[0]);
+  };
+
   const handlePickImage = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ["images"],
@@ -128,15 +151,19 @@ export default function AddSaleScreen() {
       base64: true,
     });
     if (result.canceled || !result.assets[0]) return;
-    const asset = result.assets[0];
+    await handleProcessImage(result.assets[0]);
+  };
+
+  const handleProcessImage = async (asset: any) => {
+    const assetObj = asset;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setIsExtracting(true);
     try {
-      let base64 = asset.base64;
-      if (!base64 && asset.uri) {
-        base64 = await FileSystem.readAsStringAsync(asset.uri, { encoding: (FileSystem as any).EncodingType?.Base64 || "base64" });
+      let base64 = assetObj.base64;
+      if (!base64 && assetObj.uri) {
+        base64 = await FileSystem.readAsStringAsync(assetObj.uri, { encoding: (FileSystem as any).EncodingType?.Base64 || "base64" });
       }
-      const mimeType = asset.mimeType || "image/jpeg";
+      const mimeType = assetObj.mimeType || "image/jpeg";
       const url = new URL("/api/extract-invoice", getApiUrl());
       const res = await fetch(url.toString(), {
         method: "POST",
@@ -254,13 +281,25 @@ export default function AddSaleScreen() {
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
 
         {/* AI Scan Button */}
-        <TouchableOpacity style={[styles.scanCard, isExtracting && { opacity: 0.7 }]} onPress={handlePickImage} disabled={isExtracting} activeOpacity={0.8}>
-          {isExtracting ? (
-            <><ActivityIndicator size="small" color={Colors.success} /><View style={{ marginLeft: 12 }}><Text style={styles.scanTitle}>Reading invoice with AI...</Text><Text style={styles.scanSubtitle}>Extracting all products and details</Text></View></>
-          ) : (
-            <><View style={styles.scanIcon}><Ionicons name="camera" size={22} color={Colors.success} /></View><View><Text style={styles.scanTitle}>📷 Scan Invoice with AI</Text><Text style={styles.scanSubtitle}>Works on handwritten + printed bills</Text></View><Ionicons name="chevron-forward" size={18} color={Colors.textMuted} style={{ marginLeft: "auto" }} /></>
-          )}
-        </TouchableOpacity>
+                {isExtracting ? (
+          <View style={[styles.scanCard, { justifyContent: "center", alignItems: "center", flexDirection: "row", gap: 12 }]}>
+            <ActivityIndicator size="small" color={Colors.primary} />
+            <Text style={styles.scanTitle}>Reading invoice with AI...</Text>
+          </View>
+        ) : (
+          <View style={{ flexDirection: "row", gap: 10 }}>
+            <TouchableOpacity style={[styles.scanCard, { flex: 1, flexDirection: "column", alignItems: "center", justifyContent: "center" }]} onPress={handleTakePhoto} activeOpacity={0.8}>
+              <Ionicons name="camera" size={28} color={Colors.primary} />
+              <Text style={[styles.scanTitle, { marginTop: 6 }]}>📷 Camera</Text>
+              <Text style={styles.scanSubtitle}>Click photo</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.scanCard, { flex: 1, flexDirection: "column", alignItems: "center", justifyContent: "center" }]} onPress={handlePickImage} activeOpacity={0.8}>
+              <Ionicons name="image-outline" size={28} color={Colors.primary} />
+              <Text style={[styles.scanTitle, { marginTop: 6 }]}>🖼️ Upload</Text>
+              <Text style={styles.scanSubtitle}>From gallery</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         <View style={styles.divider}>
           <View style={styles.divLine} /><Text style={styles.divText}>or enter manually</Text><View style={styles.divLine} />
