@@ -3,10 +3,8 @@ import express from "express";
 
 // server/routes.ts
 import { createServer } from "node:http";
-import Anthropic from "@anthropic-ai/sdk";
-var anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY || process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY
-});
+import { GoogleGenerativeAI } from "@google/generative-ai";
+var genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
 async function registerRoutes(app2) {
   app2.post("/api/extract-invoice", async (req, res) => {
     try {
@@ -14,71 +12,54 @@ async function registerRoutes(app2) {
       if (!imageBase64) {
         return res.status(400).json({ error: "imageBase64 is required" });
       }
-      const response = await anthropic.messages.create({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 8192,
-        messages: [
-          {
-            role: "user",
-            content: [
-              {
-                type: "image",
-                source: {
-                  type: "base64",
-                  media_type: mimeType || "image/jpeg",
-                  data: imageBase64
-                }
-              },
-              {
-                type: "text",
-                text: `You are an expert at reading Indian GST invoices \u2014 including handwritten, printed, and messy bills in Hindi or English.
+      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+      const result = await model.generateContent([
+        {
+          inlineData: {
+            mimeType: mimeType || "image/jpeg",
+            data: imageBase64
+          }
+        },
+        `You are an expert at reading Indian GST invoices \u2014 including handwritten, printed, and messy bills in Hindi or English.
 
 Extract ALL details from this invoice image. Return ONLY this exact JSON format, nothing else:
 
 {
   "supplierName": "string \u2014 business name of the seller",
-  "supplierGSTIN": "string \u2014 15-character GSTIN of seller, e.g. 27AAPFU0939F1ZV",
+  "supplierGSTIN": "string \u2014 15-character GSTIN of seller",
   "invoiceNumber": "string \u2014 invoice/bill number",
   "invoiceDate": "string \u2014 date in DD/MM/YYYY format",
   "items": [
     {
       "description": "string \u2014 product or service name",
       "hsn": "string \u2014 HSN or SAC code if visible",
-      "quantity": number \u2014 quantity of items,
-      "rate": number \u2014 rate per unit (WITHOUT GST),
-      "gstRate": number \u2014 GST percentage (0, 5, 12, 18, or 28),
-      "taxableAmount": number \u2014 quantity x rate,
-      "gstAmount": number \u2014 taxable x gstRate/100,
-      "totalAmount": number \u2014 taxable + gstAmount
+      "quantity": 1,
+      "rate": 0,
+      "gstRate": 18,
+      "taxableAmount": 0,
+      "gstAmount": 0,
+      "totalAmount": 0
     }
   ],
-  "subtotal": number \u2014 total taxable amount across all items,
-  "totalGST": number \u2014 total GST across all items,
-  "roundOff": number \u2014 round off amount if shown (can be negative),
-  "grandTotal": number \u2014 final invoice total
+  "subtotal": 0,
+  "totalGST": 0,
+  "roundOff": 0,
+  "grandTotal": 0
 }
 
-IMPORTANT RULES:
-- Extract EVERY line item separately \u2014 do not combine products
-- If quantity is not shown, use 1
-- If rate is not shown but taxable amount is, use taxableAmount as rate with quantity 1
-- For handwritten bills, read carefully \u2014 numbers may be written in Hindi numerals
-- HSN codes are usually 4-8 digit numbers
-- GSTIN is always 15 characters alphanumeric
-- If a field is truly not visible, use "" for strings and 0 for numbers
-- Return ONLY valid JSON \u2014 no explanation, no markdown`
-              }
-            ]
-          }
-        ]
-      });
-      const content = response.content[0];
-      if (content.type !== "text") {
-        return res.status(500).json({ error: "Unexpected AI response" });
-      }
-      const jsonMatch = content.text.match(/\{[\s\S]*\}/);
+RULES:
+- Extract EVERY line item separately
+- If quantity not shown, use 1
+- If rate not shown but taxable amount is, use taxableAmount as rate with quantity 1
+- HSN codes are 4-8 digit numbers
+- GSTIN is always 15 characters
+- If field not visible, use "" for strings and 0 for numbers
+- Return ONLY valid JSON \u2014 no explanation, no markdown, no backticks`
+      ]);
+      const text = result.response.text().replace(/```json|```/g, "").trim();
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
-        return res.status(422).json({ error: "Could not extract invoice data from image" });
+        return res.status(422).json({ error: "Could not extract invoice data" });
       }
       const invoiceData = JSON.parse(jsonMatch[0]);
       if (!invoiceData.items || !Array.isArray(invoiceData.items)) {
@@ -102,49 +83,27 @@ IMPORTANT RULES:
   app2.post("/api/hsn-lookup", async (req, res) => {
     try {
       const { query } = req.body;
-      if (!query) {
-        return res.status(400).json({ error: "query is required" });
-      }
-      const response = await anthropic.messages.create({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 1024,
-        messages: [
-          {
-            role: "user",
-            content: `You are an Indian GST HSN/SAC code expert.
+      if (!query) return res.status(400).json({ error: "query is required" });
+      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+      const result = await model.generateContent(
+        `You are an Indian GST HSN/SAC code expert.
 
 For this product or service: "${query}"
 
-Return ONLY this JSON object \u2014 single best match:
+Return ONLY this JSON object \u2014 no explanation, no markdown, no backticks:
 {
-  "hsn": "string \u2014 HSN code (4-8 digits) or SAC code (6 digits for services)",
-  "description": "string \u2014 official GST description of this product",
-  "gstRate": number \u2014 correct GST rate (0, 5, 12, 18, or 28),
-  "category": "goods or services"
+  "hsn": "HSN code 4-8 digits",
+  "description": "official GST description",
+  "gstRate": 18,
+  "category": "goods"
 }
 
-Examples:
-- "TMT steel bars" \u2192 hsn: "7214", gstRate: 18
-- "Cement 50kg" \u2192 hsn: "2523", gstRate: 28  
-- "Rice" \u2192 hsn: "1006", gstRate: 0
-- "Mobile phone" \u2192 hsn: "8517", gstRate: 18
-- "CA services" \u2192 hsn: "998231", gstRate: 18
-- "Wheat flour" \u2192 hsn: "1101", gstRate: 0
-
-Return ONLY valid JSON, no explanation.`
-          }
-        ]
-      });
-      const content = response.content[0];
-      if (content.type !== "text") {
-        return res.status(500).json({ error: "Unexpected AI response" });
-      }
-      const jsonMatch = content.text.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        return res.status(422).json({ error: "Could not find HSN code" });
-      }
-      const hsnData = JSON.parse(jsonMatch[0]);
-      res.json(hsnData);
+Examples: TMT steel bars \u2192 hsn 7214 gstRate 18, Cement \u2192 hsn 2523 gstRate 28, Rice \u2192 hsn 1006 gstRate 0`
+      );
+      const text = result.response.text().replace(/```json|```/g, "").trim();
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) return res.status(422).json({ error: "Could not find HSN" });
+      res.json(JSON.parse(jsonMatch[0]));
     } catch (error) {
       console.error("HSN lookup error:", error);
       res.status(500).json({ error: "Failed to lookup HSN code" });
@@ -153,92 +112,59 @@ Return ONLY valid JSON, no explanation.`
   app2.post("/api/hsn-reverse-lookup", async (req, res) => {
     try {
       const { hsn } = req.body;
-      if (!hsn) {
-        return res.status(400).json({ error: "hsn is required" });
-      }
-      const response = await anthropic.messages.create({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 512,
-        messages: [
-          {
-            role: "user",
-            content: `You are an Indian GST HSN/SAC code expert.
+      if (!hsn) return res.status(400).json({ error: "hsn is required" });
+      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+      const result = await model.generateContent(
+        `You are an Indian GST HSN/SAC code expert.
 
 For HSN/SAC code: "${hsn}"
 
-Return ONLY this JSON:
+Return ONLY this JSON \u2014 no explanation, no markdown, no backticks:
 {
   "hsn": "${hsn}",
-  "description": "string \u2014 official product/service description for this HSN code",
-  "gstRate": number \u2014 correct GST rate (0, 5, 12, 18, or 28),
-  "category": "goods or services"
-}
-
-Return ONLY valid JSON, no explanation.`
-          }
-        ]
-      });
-      const content = response.content[0];
-      if (content.type !== "text") {
-        return res.status(500).json({ error: "Unexpected AI response" });
-      }
-      const jsonMatch = content.text.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        return res.status(422).json({ error: "Could not find HSN data" });
-      }
+  "description": "official product description for this HSN code",
+  "gstRate": 18,
+  "category": "goods"
+}`
+      );
+      const text = result.response.text().replace(/```json|```/g, "").trim();
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) return res.status(422).json({ error: "Could not find HSN data" });
       res.json(JSON.parse(jsonMatch[0]));
     } catch (error) {
       console.error("HSN reverse lookup error:", error);
-      res.status(500).json({ error: "Failed to lookup HSN code" });
+      res.status(500).json({ error: "Failed to lookup HSN" });
     }
   });
   app2.post("/api/extract-gstr2b", async (req, res) => {
     try {
       const { text } = req.body;
-      if (!text) {
-        return res.status(400).json({ error: "text is required" });
-      }
-      const response = await anthropic.messages.create({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 8192,
-        messages: [
-          {
-            role: "user",
-            content: `You are a GST expert. Extract all B2B invoice entries from this GSTR-2B data:
+      if (!text) return res.status(400).json({ error: "text is required" });
+      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+      const result = await model.generateContent(
+        `Extract all B2B invoice entries from this GSTR-2B data:
 
 ${text}
 
-Return a JSON array where each item has:
-[
-  {
-    "supplierName": "string",
-    "supplierGSTIN": "string",
-    "invoiceNumber": "string",
-    "invoiceDate": "string",
-    "taxableAmount": number,
-    "igst": number,
-    "cgst": number,
-    "sgst": number,
-    "totalITC": number,
-    "gstRate": number,
-    "period": "string"
-  }
-]
-
-Return ONLY valid JSON array. Extract as many entries as you can find.`
-          }
-        ]
-      });
-      const content = response.content[0];
-      if (content.type !== "text") {
-        return res.status(500).json({ error: "Unexpected AI response" });
-      }
-      const jsonMatch = content.text.match(/\[[\s\S]*\]/);
-      if (!jsonMatch) {
-        return res.status(422).json({ error: "Could not extract GSTR-2B data" });
-      }
-      const gstr2bData = JSON.parse(jsonMatch[0]);
-      res.json(gstr2bData);
+Return ONLY a JSON array \u2014 no explanation, no markdown, no backticks:
+[{
+  "supplierName": "",
+  "supplierGSTIN": "",
+  "invoiceNumber": "",
+  "invoiceDate": "",
+  "taxableAmount": 0,
+  "igst": 0,
+  "cgst": 0,
+  "sgst": 0,
+  "totalITC": 0,
+  "gstRate": 0,
+  "period": ""
+}]`
+      );
+      const responseText = result.response.text().replace(/```json|```/g, "").trim();
+      const jsonMatch = responseText.match(/\[[\s\S]*\]/);
+      if (!jsonMatch) return res.status(422).json({ error: "Could not extract GSTR-2B data" });
+      res.json(JSON.parse(jsonMatch[0]));
     } catch (error) {
       console.error("GSTR-2B extraction error:", error);
       res.status(500).json({ error: "Failed to extract GSTR-2B data" });
