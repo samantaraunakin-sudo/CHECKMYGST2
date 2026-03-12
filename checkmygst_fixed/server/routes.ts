@@ -1,6 +1,8 @@
 import type { Express } from "express";
 import { createServer, type Server } from "node:http";
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import Groq from "groq-sdk";
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY || "" });
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
 

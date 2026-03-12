@@ -121,6 +121,21 @@ export default function AddPurchaseScreen() {
   };
 
   // Scan invoice photo → auto-fill everything
+  const handleScanWithCamera = async () => {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== "granted") {
+      Alert.alert("Permission needed", "Please allow camera access to scan invoices.");
+      return;
+    }
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ["images"],
+      quality: 0.8,
+      base64: true,
+    });
+    if (result.canceled || !result.assets[0]) return;
+    await processImage(result.assets[0]);
+  };
+
   const handlePickImage = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ["images"],
@@ -128,7 +143,11 @@ export default function AddPurchaseScreen() {
       base64: true,
     });
     if (result.canceled || !result.assets[0]) return;
-    const asset = result.assets[0];
+    await processImage(result.assets[0]);
+  };
+
+  const processImage = async (asset: any) => {
+    const assetData = asset;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setIsExtracting(true);
     try {
@@ -136,7 +155,7 @@ export default function AddPurchaseScreen() {
       if (!base64 && asset.uri) {
         base64 = await FileSystem.readAsStringAsync(asset.uri, { encoding: (FileSystem as any).EncodingType?.Base64 || "base64" });
       }
-      const mimeType = asset.mimeType || "image/jpeg";
+      const mimeType = assetData.mimeType || "image/jpeg";
       const url = new URL("/api/extract-invoice", getApiUrl());
       const res = await fetch(url.toString(), {
         method: "POST",

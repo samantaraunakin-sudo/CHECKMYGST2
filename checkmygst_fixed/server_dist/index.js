@@ -4,6 +4,8 @@ import express from "express";
 // server/routes.ts
 import { createServer } from "node:http";
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import Groq from "groq-sdk";
+var groq = new Groq({ apiKey: process.env.GROQ_API_KEY || "" });
 var genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
 async function registerRoutes(app2) {
   app2.post("/api/extract-invoice", async (req, res) => {
