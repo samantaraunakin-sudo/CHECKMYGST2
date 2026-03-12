@@ -1,3 +1,4 @@
+import { sharePDF, printPDF } from "../../lib/pdfGenerator";
 import React, { useState } from "react";
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView,
@@ -428,22 +429,66 @@ export default function AddSaleScreen() {
           <Text style={styles.addItemText}>Add Another Product</Text>
         </TouchableOpacity>
 
-        {/* Grand Total */}
-        <View style={styles.summary}>
-          <Text style={styles.summaryTitle}>Invoice Summary</Text>
-          <View style={styles.summaryRow}><Text style={styles.summaryLabel}>Subtotal (Taxable)</Text><Text style={styles.summaryValue}>₹{subtotal.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</Text></View>
-          <View style={styles.summaryRow}><Text style={styles.summaryLabel}>Total GST</Text><Text style={styles.summaryValue}>₹{totalGST.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</Text></View>
-          {Math.abs(roundOff) > 0.001 && (
-            <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>Round Off</Text>
-              <Text style={[styles.summaryValue, { color: roundOff > 0 ? "#22c55e" : "#EF4444" }]}>{roundOff > 0 ? "+" : ""}₹{roundOff.toFixed(2)}</Text>
-            </View>
-          )}
-          <View style={[styles.summaryRow, styles.summaryTotal]}>
-            <Text style={styles.summaryTotalLabel}>Grand Total</Text>
-            <Text style={[styles.summaryTotalValue, { color: Colors.success }]}>₹{grandTotal.toLocaleString("en-IN", { maximumFractionDigits: 0 })}</Text>
-          </View>
-        </View>
+{/* Grand Total */}
+<View style={styles.summary}>
+  <Text style={styles.summaryTitle}>Invoice Summary</Text>
+  <View style={styles.summaryRow}>
+    <Text style={styles.summaryLabel}>Subtotal (Taxable)</Text>
+    <Text style={styles.summaryValue}>₹{subtotal.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</Text>
+  </View>
+
+  <View style={styles.summaryRow}>
+    <Text style={styles.summaryLabel}>Total GST</Text>
+    <Text style={styles.summaryValue}>₹{totalGST.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</Text>
+  </View>
+
+  <View style={[styles.summaryRow, styles.summaryTotal]}>
+    <Text style={styles.summaryTotalLabel}>Grand Total</Text>
+    <Text style={[styles.summaryTotalValue, { color: Colors.success }]}>
+      ₹{grandTotal.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
+    </Text>
+  </View>
+</View>
+
+{/* PDF BUTTONS START HERE */}
+
+<TouchableOpacity
+  style={{ backgroundColor: "#2563EB", padding: 14, borderRadius: 12, alignItems: "center", marginTop: 14 }}
+  onPress={() =>
+    sharePDF({
+      supplierName: form.customerName,
+      supplierGSTIN: form.customerGSTIN,
+      invoiceNumber: form.invoiceNumber,
+      invoiceDate: form.invoiceDate,
+      items,
+      totalGST,
+      grandTotal
+    })
+  }
+>
+  <Text style={{ color: "#fff", fontWeight: "600" }}>
+    Generate & Share PDF Bill
+  </Text>
+</TouchableOpacity>
+
+<TouchableOpacity
+  style={{ backgroundColor: "#111827", padding: 14, borderRadius: 12, alignItems: "center", marginTop: 10 }}
+  onPress={() =>
+    printPDF({
+      supplierName: form.customerName,
+      supplierGSTIN: form.customerGSTIN,
+      invoiceNumber: form.invoiceNumber,
+      invoiceDate: form.invoiceDate,
+      items,
+      totalGST,
+      grandTotal
+    })
+  }
+>
+  <Text style={{ color: "#fff", fontWeight: "600" }}>
+    Print Invoice
+  </Text>
+</TouchableOpacity>
 
       </ScrollView>
     </View>

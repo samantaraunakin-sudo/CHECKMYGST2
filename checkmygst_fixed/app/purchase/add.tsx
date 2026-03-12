@@ -1,3 +1,4 @@
+import { sharePDF, printPDF } from "../../lib/pdfGenerator";
 import React, { useState } from "react";
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView,
@@ -422,6 +423,57 @@ export default function AddPurchaseScreen() {
             <Text style={styles.summaryTotalValue}>₹{grandTotal.toLocaleString("en-IN", { maximumFractionDigits: 0 })}</Text>
           </View>
         </View>
+        {/* PDF BUTTONS */}
+
+<TouchableOpacity
+  style={{
+    backgroundColor: "#2563EB",
+    padding: 14,
+    borderRadius: 12,
+    alignItems: "center",
+    marginTop: 14
+  }}
+  onPress={() =>
+    sharePDF({
+      supplierName: form.supplierName,
+      supplierGSTIN: form.supplierGSTIN,
+      invoiceNumber: form.invoiceNumber,
+      invoiceDate: form.invoiceDate,
+      items,
+      totalGST,
+      grandTotal
+    })
+  }
+>
+  <Text style={{ color: "#fff", fontWeight: "600" }}>
+    Generate & Share PDF Bill
+  </Text>
+</TouchableOpacity>
+
+<TouchableOpacity
+  style={{
+    backgroundColor: "#111827",
+    padding: 14,
+    borderRadius: 12,
+    alignItems: "center",
+    marginTop: 10
+  }}
+  onPress={() =>
+    printPDF({
+      supplierName: form.supplierName,
+      supplierGSTIN: form.supplierGSTIN,
+      invoiceNumber: form.invoiceNumber,
+      invoiceDate: form.invoiceDate,
+      items,
+      totalGST,
+      grandTotal
+    })
+  }
+>
+  <Text style={{ color: "#fff", fontWeight: "600" }}>
+    Print Invoice
+  </Text>
+</TouchableOpacity>
 
       </ScrollView>
     </View>
