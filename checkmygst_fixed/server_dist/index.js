@@ -384,36 +384,40 @@ If any field is not visible, use empty string for text or 0 for numbers. For gst
   });
   app2.post("/api/extract-gstr2b", async (req, res) => {
     try {
-      const { text } = req.body;
-      if (!text) return res.status(400).json({ error: "text is required" });
-      const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
-      const result = await model.generateContent(
-        `Extract all B2B invoice entries from this GSTR-2B data:
-
-${text}
-
-Return ONLY a JSON array \u2014 no explanation, no markdown, no backticks:
-[{
-  "supplierName": "",
-  "supplierGSTIN": "",
-  "invoiceNumber": "",
-  "invoiceDate": "",
-  "taxableAmount": 0,
-  "igst": 0,
-  "cgst": 0,
-  "sgst": 0,
-  "totalITC": 0,
-  "gstRate": 0,
-  "period": ""
-}]`
-      );
-      const responseText = result.response.text().replace(/```json|```/g, "").trim();
-      const jsonMatch = responseText.match(/\[[\s\S]*\]/);
+      const { text, imageBase64, mimeType } = req.body;
+      if (!text && !imageBase64) return res.status(400).json({ error: "text or imageBase64 is required" });
+      const PROMPT = `You are an expert at reading Indian GSTR-2B auto-drafted statements.
+Extract ALL B2B invoice entries. Return ONLY a valid JSON array, no markdown, no explanation:
+[{"supplierName":"","supplierGSTIN":"","invoiceNumber":"","invoiceDate":"DD/MM/YYYY","taxableAmount":0,"igst":0,"cgst":0,"sgst":0,"totalITC":0,"gstRate":0,"period":""}]
+Rule: totalITC = igst + cgst + sgst. Use 0 for missing numbers, empty string for missing text.`;
+      let responseText = "";
+      if (imageBase64) {
+        const chat = await groq.chat.completions.create({
+          model: "meta-llama/llama-4-scout-17b-16e-instruct",
+          messages: [{ role: "user", content: [
+            { type: "image_url", image_url: { url: `data:${mimeType || "image/jpeg"};base64,${imageBase64}` } },
+            { type: "text", text: PROMPT }
+          ] }],
+          max_tokens: 4e3,
+          temperature: 0.1
+        });
+        responseText = chat.choices[0]?.message?.content || "";
+      } else {
+        const chat = await groq.chat.completions.create({
+          model: "llama-3.3-70b-versatile",
+          messages: [{ role: "user", content: PROMPT + "\n\nGSTR-2B DATA:\n" + text }],
+          max_tokens: 4e3,
+          temperature: 0.1
+        });
+        responseText = chat.choices[0]?.message?.content || "";
+      }
+      const clean = responseText.replace(/```json|```/g, "").trim();
+      const jsonMatch = clean.match(/\[[\s\S]*\]/);
       if (!jsonMatch) return res.status(422).json({ error: "Could not extract GSTR-2B data" });
       res.json(JSON.parse(jsonMatch[0]));
     } catch (error) {
       console.error("GSTR-2B extraction error:", error);
-      res.status(500).json({ error: "Failed to extract GSTR-2B data" });
+      res.status(500).json({ error: "Failed to extract GSTR-2B data", detail: String(error) });
     }
   });
   const httpServer = createServer(app2);
