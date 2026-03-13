@@ -661,7 +661,7 @@ Rule: totalITC = igst + cgst + sgst. Use 0 for missing numbers, empty string for
 </html>`;
 
       await resend.emails.send({
-        from: "CheckMyGST <reminders@checkmygst.in>",
+        from: "CheckMyGST <onboarding@resend.dev>",
         to: email,
         subject: `⏰ GST Filing Due in ${reminders[0]?.daysLeft} days — ${reminders[0]?.returnType} for ${reminders[0]?.period}`,
         html,
@@ -675,66 +675,8 @@ Rule: totalITC = igst + cgst + sgst. Use 0 for missing numbers, empty string for
   });
 
 
-  // ── Email Reminders via Resend ──
-  app.post("/api/send-reminder", async (req, res) => {
-    try {
-      const { email, businessName, gstin, reminders } = req.body;
-      if (!email || !reminders?.length) return res.status(400).json({ error: "email and reminders required" });
 
-      const { Resend } = await import("resend");
-      const resend = new Resend(process.env.RESEND_API_KEY);
 
-      const rows = reminders.map((r: any) => `
-        <tr>
-          <td style="padding:10px;border-bottom:1px solid #f3f4f6;font-weight:600">${r.returnType}</td>
-          <td style="padding:10px;border-bottom:1px solid #f3f4f6">${r.period}</td>
-          <td style="padding:10px;border-bottom:1px solid #f3f4f6">${r.dueDate}</td>
-          <td style="padding:10px;border-bottom:1px solid #f3f4f6;color:${r.daysLeft <= 3 ? '#dc2626' : '#d97706'};font-weight:700">${r.daysLeft} days left</td>
-        </tr>`).join("");
-
-      const html = `<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"/></head>
-<body style="font-family:Arial,sans-serif;background:#f8fafc;padding:0;margin:0">
-  <div style="max-width:600px;margin:0 auto;background:#fff;border-radius:16px;overflow:hidden;margin-top:24px">
-    <div style="background:#1d4ed8;padding:28px 32px">
-      <h1 style="color:#fff;margin:0;font-size:22px">GST Filing Reminder</h1>
-      <p style="color:rgba(255,255,255,0.8);margin:6px 0 0">${businessName || "Your Business"} ${gstin ? "· " + gstin : ""}</p>
-    </div>
-    <div style="padding:28px 32px">
-      <p style="color:#374151;font-size:15px;margin-top:0">You have upcoming GST filing deadlines. File on time to avoid penalties.</p>
-      <table style="width:100%;border-collapse:collapse;margin:16px 0">
-        <tr style="background:#eff6ff">
-          <th style="padding:10px;text-align:left;font-size:13px;color:#1d4ed8">Return</th>
-          <th style="padding:10px;text-align:left;font-size:13px;color:#1d4ed8">Period</th>
-          <th style="padding:10px;text-align:left;font-size:13px;color:#1d4ed8">Due Date</th>
-          <th style="padding:10px;text-align:left;font-size:13px;color:#1d4ed8">Status</th>
-        </tr>
-        ${rows}
-      </table>
-      <div style="background:#fef2f2;border-radius:10px;padding:14px;margin:20px 0;border-left:4px solid #dc2626">
-        <p style="margin:0;color:#dc2626;font-size:13px;font-weight:600">⚠️ Late filing penalty: ₹50/day for GSTR-1 and GSTR-3B (max ₹10,000)</p>
-      </div>
-      <a href="https://checkmygst2.onrender.com" style="display:inline-block;background:#1d4ed8;color:#fff;text-decoration:none;padding:12px 24px;border-radius:10px;font-weight:700;font-size:14px">Open CheckMyGST →</a>
-    </div>
-    <div style="padding:16px 32px;border-top:1px solid #f3f4f6;color:#9ca3af;font-size:12px">Sent by CheckMyGST · You can disable reminders in the app settings.</div>
-  </div>
-</body>
-</html>`;
-
-      await resend.emails.send({
-        from: "CheckMyGST <reminders@checkmygst.in>",
-        to: email,
-        subject: `⏰ GST Filing Due in ${reminders[0]?.daysLeft} days — ${reminders[0]?.returnType} for ${reminders[0]?.period}`,
-        html,
-      });
-
-      res.json({ success: true });
-    } catch (error) {
-      console.error("Email reminder error:", error);
-      res.status(500).json({ error: "Failed to send reminder", detail: String(error) });
-    }
-  });
 
   const httpServer = createServer(app);
   return httpServer;
