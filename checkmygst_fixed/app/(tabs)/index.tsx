@@ -53,11 +53,9 @@ function MiniBar({ data, colors: barColors }: { data: { label: string; v1: numbe
   );
 }
 
-type DashTab = "overview" | "analytics" | "risk";
-
 export default function DashboardScreen() {
   const { profile, purchases, sales, gstr2bEntries } = useGST();
-  const [activeTab, setActiveTab] = useState<DashTab>("overview");
+
 
   const now = new Date();
   const todayKey = getTodayKey();
@@ -235,8 +233,7 @@ export default function DashboardScreen() {
         </View>
 
         {/* ── OVERVIEW ── */}
-        {activeTab === "overview" && (
-          <>
+
             <Text style={styles.sectionTitle}>{now.toLocaleDateString("en-IN", { month: "long", year: "numeric" })} Summary</Text>
             <View style={styles.statsGrid}>
               {[
@@ -297,163 +294,7 @@ export default function DashboardScreen() {
                 </TouchableOpacity>
               ))}
             </View>
-          </>
-        )}
 
-        {/* ── ANALYTICS ── */}
-        {activeTab === "analytics" && (
-          <>
-            <View style={styles.analyticsCard}>
-              <Text style={styles.analyticsTitle}>📈 Sales vs Purchases — Last 6 Months</Text>
-              <Text style={styles.analyticsSub}>Blue = Sales &nbsp;|&nbsp; Purple = Purchases</Text>
-              <MiniBar data={chartData} colors={["#16a34a", "#2563eb"]} />
-              <View style={styles.chartLegend}>
-                <View style={styles.legendItem}><View style={[styles.legendDot, { backgroundColor: "#16a34a" }]} /><Text style={styles.legendText}>Sales</Text></View>
-                <View style={styles.legendItem}><View style={[styles.legendDot, { backgroundColor: "#2563eb" }]} /><Text style={styles.legendText}>Purchases</Text></View>
-              </View>
-            </View>
-
-            {/* Monthly table */}
-            <View style={styles.analyticsCard}>
-              <Text style={styles.analyticsTitle}>📅 Month-wise GST Summary</Text>
-              <View style={styles.tableHeader}>
-                <Text style={[styles.tableCell, { flex: 1.3 }]}>Month</Text>
-                <Text style={[styles.tableCell, { flex: 1, textAlign: "right" }]}>Sales GST</Text>
-                <Text style={[styles.tableCell, { flex: 1, textAlign: "right" }]}>Purchase GST</Text>
-                <Text style={[styles.tableCell, { flex: 1, textAlign: "right" }]}>Net Payable</Text>
-              </View>
-              {chartData.map((d, i) => {
-                const mKey = getMonthKeyFromDate(new Date(now.getFullYear(), now.getMonth() - (5 - i), 1));
-                const ms = sales.filter(s => getMonthKey(s.invoiceDate) === mKey);
-                const mp = purchases.filter(p => getMonthKey(p.invoiceDate) === mKey);
-                const sg = ms.reduce((s, x) => s + (x.gstAmount || 0), 0);
-                const pg = mp.reduce((s, x) => s + (x.gstAmount || 0), 0);
-                const net = sg - pg;
-                return (
-                  <View key={i} style={styles.tableRow}>
-                    <Text style={[styles.tableCell, { flex: 1.3, fontWeight: "600" }]}>{d.label}</Text>
-                    <Text style={[styles.tableCell, { flex: 1, textAlign: "right", color: "#dc2626" }]}>{formatINR(sg)}</Text>
-                    <Text style={[styles.tableCell, { flex: 1, textAlign: "right", color: "#16a34a" }]}>{formatINR(pg)}</Text>
-                    <Text style={[styles.tableCell, { flex: 1, textAlign: "right", fontWeight: "700", color: net > 0 ? "#dc2626" : "#16a34a" }]}>{formatINR(Math.abs(net))}</Text>
-                  </View>
-                );
-              })}
-            </View>
-
-            {/* Top Suppliers */}
-            {topSuppliers.length > 0 && (
-              <View style={styles.analyticsCard}>
-                <Text style={styles.analyticsTitle}>🏪 Top Suppliers by Purchase Value</Text>
-                {topSuppliers.map(([name, val], i) => (
-                  <View key={i} style={styles.supplierRow}>
-                    <View style={[styles.supplierRank, { backgroundColor: ["#fef3c7","#f3f4f6","#fdf4ff","#f0fdf4"][i] }]}>
-                      <Text style={styles.supplierRankText}>#{i+1}</Text>
-                    </View>
-                    <Text style={styles.supplierName} numberOfLines={1}>{name}</Text>
-                    <Text style={styles.supplierVal}>{formatINR(val)}</Text>
-                  </View>
-                ))}
-              </View>
-            )}
-
-            <TouchableOpacity style={styles.fullReportBtn} onPress={() => router.push("/(tabs)/reports" as any)}>
-              <Ionicons name="document-text-outline" size={18} color="#fff" />
-              <Text style={styles.fullReportBtnText}>Download Full PDF Report</Text>
-            </TouchableOpacity>
-          </>
-        )}
-
-        {/* ── RISK ── */}
-        {activeTab === "risk" && (
-          <>
-            {/* What is risk meter */}
-            <View style={styles.riskExplainCard}>
-              <Text style={styles.riskExplainTitle}>What is the GST Risk Meter?</Text>
-              <Text style={styles.riskExplainText}>
-                This shows how likely you are to face GST penalties or notices. Like a car dashboard warning light — green means everything is fine, red means you need to take action immediately.
-              </Text>
-            </View>
-
-            {/* Risk score */}
-            <View style={[styles.riskCard, { borderColor: riskData.color }]}>
-              <View style={styles.riskScoreRow}>
-                <View>
-                  <Text style={[styles.riskLevel, { color: riskData.color }]}>{riskData.emoji} {riskData.level}</Text>
-                  <Text style={styles.riskScoreLabel}>Risk Score: {riskData.score}/100</Text>
-                </View>
-                <View style={styles.riskMeter}>
-                  <View style={styles.riskTrack}>
-                    <View style={[styles.riskFill, { width: `${riskData.score}%` as any, backgroundColor: riskData.color }]} />
-                  </View>
-                </View>
-              </View>
-
-              {/* Color scale explanation */}
-              <View style={styles.riskScale}>
-                {[
-                  { label: "0–20\nSafe", color: "#16a34a" },
-                  { label: "21–40\nLow Risk", color: "#65a30d" },
-                  { label: "41–60\nAttention", color: "#d97706" },
-                  { label: "61–100\nUrgent", color: "#dc2626" },
-                ].map(s => (
-                  <View key={s.label} style={styles.riskScaleItem}>
-                    <View style={[styles.riskScaleDot, { backgroundColor: s.color }]} />
-                    <Text style={styles.riskScaleText}>{s.label}</Text>
-                  </View>
-                ))}
-              </View>
-            </View>
-
-            {/* Issues */}
-            {riskData.issues.length === 0 ? (
-              <View style={styles.riskAllGood}>
-                <Text style={styles.riskAllGoodEmoji}>🎉</Text>
-                <Text style={styles.riskAllGoodTitle}>Everything looks good!</Text>
-                <Text style={styles.riskAllGoodSub}>No GST compliance issues found. Keep recording your invoices regularly.</Text>
-              </View>
-            ) : (
-              <>
-                <Text style={styles.sectionTitle}>Issues Found</Text>
-                {riskData.issues.map((issue, i) => (
-                  <View key={i} style={[styles.issueCard, {
-                    borderLeftColor: issue.severity === "high" ? "#dc2626" : issue.severity === "medium" ? "#d97706" : "#65a30d",
-                    backgroundColor: issue.severity === "high" ? "#fef2f2" : issue.severity === "medium" ? "#fffbeb" : "#f7fee7",
-                  }]}>
-                    <Ionicons
-                      name={issue.severity === "high" ? "close-circle" : issue.severity === "medium" ? "warning" : "information-circle"}
-                      size={18}
-                      color={issue.severity === "high" ? "#dc2626" : issue.severity === "medium" ? "#d97706" : "#65a30d"}
-                    />
-                    <Text style={styles.issueText}>{issue.text}</Text>
-                  </View>
-                ))}
-
-                <Text style={styles.sectionTitle}>What You Should Do</Text>
-                {riskData.tips.map((tip, i) => (
-                  <View key={i} style={styles.tipCard}>
-                    <View style={styles.tipNumber}><Text style={styles.tipNumberText}>{i+1}</Text></View>
-                    <Text style={styles.tipText}>{tip}</Text>
-                  </View>
-                ))}
-              </>
-            )}
-
-            {/* Penalty info */}
-            <View style={styles.penaltyCard}>
-              <Text style={styles.penaltyTitle}>⚠️ Know the Penalties</Text>
-              {[
-                { q: "What happens if I file GSTR-1 late?", a: "₹50 per day fine (₹20/day if no sales). Max ₹10,000." },
-                { q: "What if I don't pay GST on time?", a: "18% annual interest on unpaid amount + ₹50/day late fee." },
-                { q: "What is the maximum penalty?", a: "₹10,000 per return + interest on unpaid tax." },
-              ].map(p => (
-                <View key={p.q} style={styles.penaltyRow}>
-                  <Text style={styles.penaltyQ}>❓ {p.q}</Text>
-                  <Text style={styles.penaltyA}>→ {p.a}</Text>
-                </View>
-              ))}
-            </View>
-          </>
-        )}
 
       </ScrollView>
     </View>
@@ -478,11 +319,7 @@ const styles = StyleSheet.create({
   todayDivider: { width: 1, backgroundColor: "#e5e7eb", marginHorizontal: 16 },
   alertBanner: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#fef2f2", borderRadius: 12, padding: 12, marginBottom: 8, borderWidth: 1, borderColor: "#fecaca" },
   alertText: { flex: 1, fontSize: 13, fontWeight: "600", color: "#dc2626" },
-  dashTabs: { flexDirection: "row", backgroundColor: "#fff", borderRadius: 12, padding: 4, marginBottom: 16, borderWidth: 1, borderColor: "#e5e7eb" },
-  dashTab: { flex: 1, paddingVertical: 8, alignItems: "center", borderRadius: 8 },
-  dashTabActive: { backgroundColor: Colors.primary },
-  dashTabText: { fontSize: 12, fontWeight: "600", color: "#6b7280" },
-  dashTabTextActive: { color: "#fff" },
+
   sectionTitle: { fontSize: 15, fontWeight: "700", color: "#111827", marginBottom: 10, marginTop: 4 },
   statsGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginBottom: 12 },
   statCard: { width: "47%", backgroundColor: "#fff", borderRadius: 14, padding: 14, borderWidth: 1, borderColor: "#e5e7eb" },
