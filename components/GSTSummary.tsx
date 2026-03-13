@@ -1,50 +1,81 @@
+import React from "react";
+import { View, Text, StyleSheet } from "react-native";
+import { useGST } from "@/contexts/GSTContext";
+import Colors from "@/constants/colors";
 
-"use client";
-import React, { useEffect, useState } from "react";
+function formatINR(n: number) {
+  return "₹" + n.toLocaleString("en-IN", { maximumFractionDigits: 0 });
+}
 
 export default function GSTSummary() {
+  const { purchases, sales } = useGST();
 
-  const [salesGST, setSalesGST] = useState(0);
-  const [purchaseGST, setPurchaseGST] = useState(0);
-  const [netGST, setNetGST] = useState(0);
+  const purchaseGST = purchases.reduce((sum, p) => sum + (p.gstAmount || 0), 0);
+  const salesGST = sales.reduce((sum, s) => sum + (s.gstAmount || 0), 0);
 
-  useEffect(() => {
-
-    async function loadGST() {
-      const res = await fetch("/api/gst-summary");
-      const data = await res.json();
-
-      setSalesGST(data.salesGST || 0);
-      setPurchaseGST(data.purchaseGST || 0);
-      setNetGST(data.netGST || 0);
-    }
-
-    loadGST();
-
-  }, []);
+  const netGST = salesGST - purchaseGST;
 
   return (
+    <View style={styles.card}>
+      <Text style={styles.title}>GST Summary</Text>
 
-    <div style={{
-      background:"#fff",
-      padding:"20px",
-      borderRadius:"12px",
-      marginBottom:"20px"
-    }}>
+      <View style={styles.row}>
+        <Text style={styles.label}>Sales GST</Text>
+        <Text style={styles.value}>{formatINR(salesGST)}</Text>
+      </View>
 
-      <h2>GST Summary</h2>
+      <View style={styles.row}>
+        <Text style={styles.label}>Purchase GST</Text>
+        <Text style={styles.value}>{formatINR(purchaseGST)}</Text>
+      </View>
 
-      <p>Sales GST Collected</p>
-      <h3 style={{color:"#2563EB"}}>₹{salesGST.toLocaleString("en-IN")}</h3>
+      <View style={styles.divider} />
 
-      <p>Purchase GST Credit</p>
-      <h3 style={{color:"#16A34A"}}>₹{purchaseGST.toLocaleString("en-IN")}</h3>
-
-      <p>Net GST Payable</p>
-      <h2 style={{color:"#EF4444"}}>₹{netGST.toLocaleString("en-IN")}</h2>
-
-    </div>
-
+      <View style={styles.row}>
+        <Text style={styles.netLabel}>Net GST Payable</Text>
+        <Text style={styles.netValue}>{formatINR(netGST)}</Text>
+      </View>
+    </View>
   );
 }
 
+const styles = StyleSheet.create({
+  card: {
+    backgroundColor: Colors.surface,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 20,
+  },
+  title: {
+    fontSize: 16,
+    fontWeight: "700",
+    marginBottom: 12,
+    color: Colors.textPrimary,
+  },
+  row: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 6,
+  },
+  label: {
+    fontSize: 13,
+    color: Colors.textSecondary,
+  },
+  value: {
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  divider: {
+    height: 1,
+    backgroundColor: "#eee",
+    marginVertical: 8,
+  },
+  netLabel: {
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  netValue: {
+    fontSize: 14,
+    fontWeight: "700",
+  },
+});
