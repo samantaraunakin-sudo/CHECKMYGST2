@@ -13,7 +13,18 @@ function formatINR(n: number) {
   return "₹" + n.toLocaleString("en-IN", { maximumFractionDigits: 0 });
 }
 
-function InvoiceCard({ item, onDelete }: { item: PurchaseInvoice; onDelete: () => void }) {
+function InvoiceCard({ item, onDelete, onEdit }: { item: PurchaseInvoice; onDelete: () => void; onEdit: () => void }) {
+  const handleDelete = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (Platform.OS === "web") {
+      if (window.confirm("Delete this invoice? This cannot be undone.")) onDelete();
+    } else {
+      Alert.alert("Delete Invoice", "Are you sure?", [
+        { text: "Cancel", style: "cancel" },
+        { text: "Delete", style: "destructive", onPress: onDelete },
+      ]);
+    }
+  };
   return (
     <View style={styles.card}>
       <View style={styles.cardHeader}>
@@ -22,18 +33,14 @@ function InvoiceCard({ item, onDelete }: { item: PurchaseInvoice; onDelete: () =
           <Text style={styles.invoiceMeta}>{item.invoiceNumber} • {item.invoiceDate}</Text>
           {item.supplierGSTIN ? <Text style={styles.gstin}>{item.supplierGSTIN}</Text> : null}
         </View>
-        <TouchableOpacity
-          onPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            Alert.alert("Delete Invoice", "Are you sure?", [
-              { text: "Cancel", style: "cancel" },
-              { text: "Delete", style: "destructive", onPress: onDelete },
-            ]);
-          }}
-          hitSlop={8}
-        >
-          <Ionicons name="trash-outline" size={18} color={Colors.danger} />
-        </TouchableOpacity>
+        <View style={styles.cardActions}>
+          <TouchableOpacity onPress={onEdit} hitSlop={8} style={styles.editBtn}>
+            <Ionicons name="pencil-outline" size={16} color={Colors.primary} />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={handleDelete} hitSlop={8} style={styles.deleteBtn}>
+            <Ionicons name="trash-outline" size={16} color={Colors.danger} />
+          </TouchableOpacity>
+        </View>
       </View>
       <View style={styles.cardFooter}>
         <View>
@@ -168,7 +175,7 @@ export default function PurchasesScreen() {
           </View>
         )}
         renderItem={({ item }) => (
-          <InvoiceCard item={item} onDelete={() => deletePurchase(item.id)} />
+          <InvoiceCard item={item} onDelete={() => deletePurchase(item.id)} onEdit={() => router.push({ pathname: "/purchase/edit", params: { id: item.id } } as any)} />
         )}
         ListEmptyComponent={
           <View style={styles.empty}>
@@ -213,6 +220,9 @@ const styles = StyleSheet.create({
   rateChip: { backgroundColor: "#EEF2FF", borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
   rateText: { fontSize: 11, fontFamily: "Inter_600SemiBold", color: Colors.primary },
   hsnTag: { fontSize: 11, fontFamily: "Inter_400Regular", color: Colors.textMuted, marginTop: 6 },
+  cardActions: { flexDirection: "row", gap: 8, alignItems: "center" },
+  editBtn: { width: 32, height: 32, borderRadius: 8, backgroundColor: "#eff6ff", justifyContent: "center", alignItems: "center" },
+  deleteBtn: { width: 32, height: 32, borderRadius: 8, backgroundColor: "#fef2f2", justifyContent: "center", alignItems: "center" },
   empty: { alignItems: "center", paddingVertical: 60, paddingHorizontal: 40 },
   emptyIcon: { width: 72, height: 72, borderRadius: 36, backgroundColor: Colors.surfaceAlt, justifyContent: "center", alignItems: "center", marginBottom: 16 },
   emptyTitle: { fontSize: 18, fontFamily: "Inter_600SemiBold", color: Colors.textPrimary, marginBottom: 8 },
