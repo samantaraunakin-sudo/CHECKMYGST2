@@ -6,6 +6,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { useGST } from "@/contexts/GSTContext";
+import { getApiUrl } from "@/lib/query-client";
 import Colors from "@/constants/colors";
 import * as Haptics from "expo-haptics";
 
@@ -55,6 +56,65 @@ export default function FilingsScreen() {
   const [showPicker, setShowPicker] = useState(false);
   const [pickerYear, setPickerYear] = useState(now.getFullYear());
   const [showInfo, setShowInfo] = useState(false);
+  const [notifEnabled, setNotifEnabled] = useState(false);
+  const [emailSent, setEmailSent] = useState(false);
+  const [isSendingEmail, setIsSendingEmail] = useState(false);
+
+  const enableBrowserNotifications = async () => {
+    if (typeof Notification === "undefined") { alert("Browser notifications not supported"); return; }
+    const perm = await Notification.requestPermission();
+    if (perm === "granted") {
+      setNotifEnabled(true);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      new Notification("CheckMyGST Reminders Enabled", {
+        body: "You will receive GST filing reminders in your browser.",
+        icon: "/favicon.ico",
+      });
+    }
+  };
+
+  const sendEmailReminder = async () => {
+    if (!profile?.id) { alert("Please complete your profile first"); return; }
+    setIsSendingEmail(true);
+    try {
+      const now = new Date();
+      const upcomingReminders: any[] = [];
+      selectedPeriods.forEach(({ year, month }) => {
+        ["GSTR-1", "GSTR-3B"].forEach(rt => {
+          const key = year + "-" + month + "-" + rt;
+          if (!filedStatus[key]) {
+            const nextMonth = month === 11 ? 0 : month + 1;
+            const nextYear = month === 11 ? year + 1 : year;
+            const dueDate = new Date(nextYear, nextMonth, rt === "GSTR-1" ? 11 : 20);
+            const daysLeft = Math.ceil((dueDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+            if (daysLeft >= 0 && daysLeft <= 10) {
+              upcomingReminders.push({
+                returnType: rt,
+                period: MONTHS[month] + " " + year,
+                dueDate: dueDate.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }),
+                daysLeft,
+              });
+            }
+          }
+        });
+      });
+      if (upcomingReminders.length === 0) { alert("No upcoming deadlines in the next 10 days!"); setIsSendingEmail(false); return; }
+      const apiBase = getApiUrl();
+      const res = await fetch(new URL("/api/send-reminder", apiBase).toString(), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: (profile as any).email || "",
+          businessName: profile?.businessName,
+          gstin: profile?.gstin,
+          reminders: upcomingReminders,
+        }),
+      });
+      if (res.ok) { setEmailSent(true); Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); }
+      else { const d = await res.json(); alert("Failed: " + (d.error || "Unknown error")); }
+    } catch (e: any) { alert("Error: " + e.message); }
+    finally { setIsSendingEmail(false); }
+  };
 
   const years = [now.getFullYear() - 1, now.getFullYear(), now.getFullYear() + 1];
 
@@ -154,6 +214,29 @@ export default function FilingsScreen() {
           <Ionicons name="add-circle-outline" size={20} color={Colors.primary} />
           <Text style={styles.addPeriodText}>Add Month to Track</Text>
         </TouchableOpacity>
+
+        {/* Reminder Actions */}
+        <View style={styles.reminderRow}>
+          <TouchableOpacity
+            style={[styles.reminderBtn, notifEnabled && { backgroundColor: "#f0fdf4", borderColor: "#16a34a" }]}
+            onPress={enableBrowserNotifications}
+          >
+            <Ionicons name={notifEnabled ? "notifications" : "notifications-outline"} size={16} color={notifEnabled ? "#16a34a" : Colors.primary} />
+            <Text style={[styles.reminderBtnText, notifEnabled && { color: "#16a34a" }]}>
+              {notifEnabled ? "Notifs ON ✓" : "Enable Alerts"}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.reminderBtn, emailSent && { backgroundColor: "#f0fdf4", borderColor: "#16a34a" }, isSendingEmail && { opacity: 0.6 }]}
+            onPress={sendEmailReminder}
+            disabled={isSendingEmail}
+          >
+            <Ionicons name="mail-outline" size={16} color={emailSent ? "#16a34a" : "#7c3aed"} />
+            <Text style={[styles.reminderBtnText, { color: emailSent ? "#16a34a" : "#7c3aed" }]}>
+              {isSendingEmail ? "Sending..." : emailSent ? "Email Sent ✓" : "Email Reminder"}
+            </Text>
+          </TouchableOpacity>
+        </View>
 
         {/* Period Cards */}
         {selectedPeriods.map(({ year, month }) => {
@@ -326,6 +409,9 @@ const styles = StyleSheet.create({
   quickActions: { flexDirection: "row", gap: 8, marginBottom: 12 },
   quickBtn: { flex: 1, backgroundColor: "#fff", borderRadius: 12, padding: 10, alignItems: "center", gap: 4, borderWidth: 1, borderColor: "#e5e7eb" },
   quickBtnText: { fontSize: 11, fontWeight: "600", color: Colors.primary, textAlign: "center" },
+  reminderRow: { flexDirection: "row", gap: 10, marginBottom: 14 },
+  reminderBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 10, borderRadius: 12, borderWidth: 1.5, borderColor: "#e5e7eb", backgroundColor: "#fff" },
+  reminderBtnText: { fontSize: 12, fontWeight: "600", color: Colors.primary },
   addPeriodBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: "#eff6ff", borderRadius: 12, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: "#bfdbfe", borderStyle: "dashed" },
   addPeriodText: { fontSize: 14, fontWeight: "600", color: Colors.primary },
   monthBlock: { backgroundColor: "#fff", borderRadius: 16, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: "#e5e7eb" },
