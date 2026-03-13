@@ -128,11 +128,30 @@ export function getTodayDate(): string {
 }
 
 export function parseInvoiceDate(dateStr: string): Date {
-  const parts = dateStr.split("/");
-  if (parts.length === 3) {
-    return new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
+  if (!dateStr) return new Date();
+  // DD/MM/YYYY format
+  if (dateStr.includes("/")) {
+    const parts = dateStr.split("/");
+    if (parts.length === 3) {
+      return new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
+    }
+  }
+  // YYYY-MM-DD ISO format from Supabase
+  if (dateStr.includes("-") && dateStr.length >= 10) {
+    const parts = dateStr.substring(0, 10).split("-");
+    return new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
   }
   return new Date(dateStr);
+}
+// Normalize any date to DD/MM/YYYY for display
+export function normalizeDateDisplay(dateStr: string): string {
+  if (!dateStr) return "";
+  if (dateStr.includes("/")) return dateStr;
+  if (dateStr.includes("-") && dateStr.length >= 10) {
+    const parts = dateStr.substring(0, 10).split("-");
+    return parts[2] + "/" + parts[1] + "/" + parts[0];
+  }
+  return dateStr;
 }
 
 export function getMonthKey(dateStr: string): string {

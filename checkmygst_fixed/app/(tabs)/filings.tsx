@@ -12,6 +12,14 @@ import * as Haptics from "expo-haptics";
 
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const RETURN_TYPES = ["GSTR-1", "GSTR-3B"];
+const RETURN_PLAIN = {
+  "GSTR-1": "Sales Return (GSTR-1)",
+  "GSTR-3B": "Tax Payment Return (GSTR-3B)",
+};
+const RETURN_DESC = {
+  "GSTR-1": "Report all your sales invoices to the government",
+  "GSTR-3B": "Pay your final GST after deducting purchase tax credits",
+};
 
 function getDueDate(year: number, month: number, returnType: string) {
   const nextMonth = month === 11 ? 0 : month + 1;
@@ -49,7 +57,11 @@ export default function FilingsScreen() {
   const now = new Date();
 
   // Selected periods — user can add/remove
+  // Show previous month first (that's what's actually due NOW)
+  // and current month so user can see upcoming deadlines
+  const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
   const [selectedPeriods, setSelectedPeriods] = useState<{year: number, month: number}[]>([
+    { year: prevMonth.getFullYear(), month: prevMonth.getMonth() },
     { year: now.getFullYear(), month: now.getMonth() },
   ]);
   const [filedStatus, setFiledStatus] = useState<Record<string, boolean>>({});
@@ -283,7 +295,8 @@ export default function FilingsScreen() {
                       />
                     </View>
                     <View style={styles.returnInfo}>
-                      <Text style={styles.returnName}>{rt}</Text>
+                      <Text style={styles.returnName}>{RETURN_PLAIN[rt as keyof typeof RETURN_PLAIN] || rt}</Text>
+                      <Text style={styles.returnDesc}>{RETURN_DESC[rt as keyof typeof RETURN_DESC]}</Text>
                       <Text style={styles.returnDue}>
                         Due: {due.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
                       </Text>
@@ -426,6 +439,7 @@ const styles = StyleSheet.create({
   returnInfo: { flex: 1 },
   returnName: { fontSize: 14, fontWeight: "700", color: "#111827" },
   returnDue: { fontSize: 12, color: "#6b7280", marginTop: 2 },
+  returnDesc: { fontSize: 11, color: "#9ca3af", marginTop: 1, lineHeight: 15 },
   returnRight: { alignItems: "flex-end", gap: 6 },
   statusLabel: { fontSize: 12, fontWeight: "700" },
   filedBtn: { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 8, borderWidth: 1 },
