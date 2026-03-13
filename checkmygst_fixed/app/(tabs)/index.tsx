@@ -285,6 +285,8 @@ export default function DashboardScreen() {
                 { label: "Record a Sale", icon: "arrow-up-circle-outline", color: "#f0fdf4", iconColor: "#16a34a", route: "/sale/add", desc: "Add customer invoice" },
                 { label: "Upload GSTR-2B", icon: "cloud-upload-outline", color: "#fffbeb", iconColor: "#d97706", route: "/gstr2b/upload", desc: "Verify your tax credits" },
                 { label: "View Filings", icon: "calendar-outline", color: "#fdf4ff", iconColor: "#9333ea", route: "/(tabs)/filings", desc: "Check due dates" },
+                { label: "Analytics", icon: "stats-chart-outline", color: "#f0f9ff", iconColor: "#0284c7", route: "/(tabs)/analytics", desc: "Sales & GST trends" },
+                { label: "Reports", icon: "document-text-outline", color: "#fdf2f8", iconColor: "#db2777", route: "/(tabs)/reports", desc: "Download PDF report" },
               ].map(a => (
                 <TouchableOpacity key={a.label} style={styles.actionCard} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); router.push(a.route as any); }} activeOpacity={0.8}>
                   <View style={[styles.actionIcon, { backgroundColor: a.color }]}>
