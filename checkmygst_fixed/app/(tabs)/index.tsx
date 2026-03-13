@@ -45,6 +45,7 @@ export default function DashboardScreen() {
 
   const totalITC = gstr2bEntries.reduce((s, g) => s + g.totalITC, 0);
 
+  const handleGoReports = () => router.push("/(tabs)/reports" as any);
   const handleShare = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     const msg = `*CheckMyGST Report*\n${profile?.businessName || "My Business"}\n${getTodayLabel()}\n\nToday:\n• Purchases: ${formatINR(todayPurchaseTotal)}\n• Sales: ${formatINR(todaySaleTotal)}\n\nThis Month:\n• Purchases: ${formatINR(monthPurchaseTotal)}\n• Sales: ${formatINR(monthSaleTotal)}\n\nITC Available: ${formatINR(totalITC)}\n\nGenerated via CheckMyGST`;
