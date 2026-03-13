@@ -1,3 +1,10 @@
+var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require : typeof Proxy !== "undefined" ? new Proxy(x, {
+  get: (a, b) => (typeof require !== "undefined" ? require : a)[b]
+}) : x)(function(x) {
+  if (typeof require !== "undefined") return require.apply(this, arguments);
+  throw Error('Dynamic require of "' + x + '" is not supported');
+});
+
 // server/index.ts
 import express from "express";
 
@@ -418,6 +425,164 @@ Rule: totalITC = igst + cgst + sgst. Use 0 for missing numbers, empty string for
     } catch (error) {
       console.error("GSTR-2B extraction error:", error);
       res.status(500).json({ error: "Failed to extract GSTR-2B data", detail: String(error) });
+    }
+  });
+  app2.post("/api/extract-gstr2b-file", async (req, res) => {
+    try {
+      const { fileBase64, fileName, mimeType } = req.body;
+      if (!fileBase64) return res.status(400).json({ error: "fileBase64 required" });
+      const data = Buffer.from(fileBase64, "base64");
+      let extractText = "";
+      if (mimeType && mimeType.includes("pdf") || fileName && fileName.endsWith(".pdf")) {
+        const pdfParse = (await import("pdf-parse")).default;
+        const pdf = await pdfParse(data);
+        extractText = pdf.text;
+      } else {
+        const XLSX = await import("xlsx");
+        const wb = XLSX.read(data, { type: "buffer" });
+        wb.SheetNames.forEach((name) => {
+          extractText += XLSX.utils.sheet_to_csv(wb.Sheets[name]) + "\n";
+        });
+      }
+      if (!extractText.trim()) return res.status(422).json({ error: "Could not read file content" });
+      const PROMPT = "Extract ALL B2B invoice entries from this GSTR-2B data. Return ONLY a valid JSON array, no markdown: [{supplierName,supplierGSTIN,invoiceNumber,invoiceDate,taxableAmount,igst,cgst,sgst,totalITC,gstRate,period}]. totalITC=igst+cgst+sgst";
+      const chat = await groq.chat.completions.create({
+        model: "llama-3.3-70b-versatile",
+        messages: [{ role: "user", content: PROMPT + "\n\nDATA:\n" + extractText.substring(0, 8e3) }],
+        max_tokens: 4e3,
+        temperature: 0.1
+      });
+      const responseText = chat.choices[0]?.message?.content || "";
+      const clean = responseText.replace(/```json|```/g, "").trim();
+      const m = clean.match(/\[[\s\S]*\]/);
+      if (!m) return res.status(422).json({ error: "Could not extract GSTR-2B data from file" });
+      res.json(JSON.parse(m[0]));
+    } catch (error) {
+      console.error("File extract error:", error);
+      res.status(500).json({ error: "Failed to extract from file", detail: String(error) });
+    }
+  });
+  app2.get("/auth/google", (req, res) => {
+    const { google } = __require("googleapis");
+    const oauth2Client = new google.auth.OAuth2(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      process.env.GOOGLE_REDIRECT_URI || "https://checkmygst2.onrender.com/auth/google/callback"
+    );
+    const url = oauth2Client.generateAuthUrl({
+      access_type: "offline",
+      scope: ["https://www.googleapis.com/auth/gmail.readonly"],
+      prompt: "consent"
+    });
+    res.redirect(url);
+  });
+  app2.get("/auth/google/callback", async (req, res) => {
+    const { google } = __require("googleapis");
+    const code = req.query.code;
+    if (!code) return res.status(400).send("No code");
+    try {
+      const oauth2Client = new google.auth.OAuth2(
+        process.env.GOOGLE_CLIENT_ID,
+        process.env.GOOGLE_CLIENT_SECRET,
+        process.env.GOOGLE_REDIRECT_URI || "https://checkmygst2.onrender.com/auth/google/callback"
+      );
+      const { tokens } = await oauth2Client.getToken(code);
+      req.session.gmailTokens = tokens;
+      res.send("<html><body><script>window.opener&&window.opener.postMessage({type:'GMAIL_AUTH_SUCCESS'},'*');window.close();</script><p>Gmail connected! Close this window.</p></body></html>");
+    } catch (e) {
+      console.error("OAuth error:", e);
+      res.status(500).send("OAuth failed");
+    }
+  });
+  app2.get("/api/gmail/status", (req, res) => {
+    res.json({ connected: !!req.session?.gmailTokens });
+  });
+  app2.post("/api/gmail/disconnect", (req, res) => {
+    if (req.session) req.session.gmailTokens = null;
+    res.json({ success: true });
+  });
+  app2.get("/api/gmail/gst-emails", async (req, res) => {
+    const tokens = req.session?.gmailTokens;
+    if (!tokens) return res.status(401).json({ error: "Gmail not connected" });
+    try {
+      const { google } = __require("googleapis");
+      const oauth2Client = new google.auth.OAuth2(
+        process.env.GOOGLE_CLIENT_ID,
+        process.env.GOOGLE_CLIENT_SECRET
+      );
+      oauth2Client.setCredentials(tokens);
+      const gmail = google.gmail({ version: "v1", auth: oauth2Client });
+      const searchRes = await gmail.users.messages.list({
+        userId: "me",
+        q: 'from:noreply@gst.gov.in OR subject:"GSTR-2B" OR subject:"GST Return" OR subject:"Input Tax Credit"',
+        maxResults: 20
+      });
+      const messages = searchRes.data.messages || [];
+      if (!messages.length) return res.json([]);
+      const details = await Promise.all(messages.slice(0, 15).map(async (msg) => {
+        const d = await gmail.users.messages.get({ userId: "me", id: msg.id, format: "metadata", metadataHeaders: ["Subject", "From", "Date"] });
+        const h = d.data.payload?.headers || [];
+        const get = (n) => h.find((x) => x.name === n)?.value || "";
+        return { id: msg.id, subject: get("Subject"), from: get("From"), date: get("Date"), hasAttachment: (d.data.payload?.parts || []).some((p) => p.filename) };
+      }));
+      res.json(details);
+    } catch (e) {
+      console.error("Gmail search error:", e);
+      res.status(500).json({ error: "Failed to search Gmail", detail: String(e) });
+    }
+  });
+  app2.post("/api/gmail/extract-email", async (req, res) => {
+    const tokens = req.session?.gmailTokens;
+    if (!tokens) return res.status(401).json({ error: "Gmail not connected" });
+    const { emailId } = req.body;
+    if (!emailId) return res.status(400).json({ error: "emailId required" });
+    try {
+      const { google } = __require("googleapis");
+      const oauth2Client = new google.auth.OAuth2(process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET);
+      oauth2Client.setCredentials(tokens);
+      const gmail = google.gmail({ version: "v1", auth: oauth2Client });
+      const detail = await gmail.users.messages.get({ userId: "me", id: emailId, format: "full" });
+      const payload = detail.data.payload;
+      const getBody = (part) => {
+        if (part.body?.data) return Buffer.from(part.body.data, "base64").toString("utf-8");
+        if (part.parts) return part.parts.map(getBody).join("\n");
+        return "";
+      };
+      let extractText = getBody(payload);
+      const parts = payload?.parts || [];
+      for (const part of parts) {
+        if (part.filename && part.body?.attachmentId) {
+          const att = await gmail.users.messages.attachments.get({ userId: "me", messageId: emailId, id: part.body.attachmentId });
+          const data = Buffer.from(att.data.data || "", "base64");
+          if (part.filename.endsWith(".pdf")) {
+            const pdfParse = (await import("pdf-parse")).default;
+            const pdf = await pdfParse(data);
+            extractText += "\n" + pdf.text;
+          } else if (part.filename.endsWith(".xlsx") || part.filename.endsWith(".xls")) {
+            const XLSX = await import("xlsx");
+            const wb = XLSX.read(data, { type: "buffer" });
+            wb.SheetNames.forEach((name) => {
+              extractText += "\n" + XLSX.utils.sheet_to_csv(wb.Sheets[name]);
+            });
+          }
+        }
+      }
+      if (!extractText.trim()) return res.status(422).json({ error: "Could not extract text from email" });
+      const PROMPT = "Extract ALL B2B invoice entries from this GSTR-2B email. Return ONLY a valid JSON array, no markdown: [{supplierName,supplierGSTIN,invoiceNumber,invoiceDate,taxableAmount,igst,cgst,sgst,totalITC,gstRate,period}]. totalITC=igst+cgst+sgst";
+      const chat = await groq.chat.completions.create({
+        model: "llama-3.3-70b-versatile",
+        messages: [{ role: "user", content: PROMPT + "\n\nDATA:\n" + extractText.substring(0, 8e3) }],
+        max_tokens: 4e3,
+        temperature: 0.1
+      });
+      const responseText = chat.choices[0]?.message?.content || "";
+      const clean = responseText.replace(/```json|```/g, "").trim();
+      const m = clean.match(/\[[\s\S]*\]/);
+      if (!m) return res.status(422).json({ error: "Could not extract invoice data from email" });
+      res.json(JSON.parse(m[0]));
+    } catch (e) {
+      console.error("Gmail extract error:", e);
+      res.status(500).json({ error: "Failed to extract from email", detail: String(e) });
     }
   });
   const httpServer = createServer(app2);
