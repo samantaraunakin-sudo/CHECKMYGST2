@@ -27,6 +27,8 @@ export interface PurchaseInvoice {
   invoiceDate: string;
   description: string;
   hsn: string;
+  quantity: number;
+  rate: number;
   gstRate: number;
   taxableAmount: number;
   gstAmount: number;
@@ -42,6 +44,8 @@ export interface SalesInvoice {
   invoiceDate: string;
   description: string;
   hsn: string;
+  quantity: number;
+  rate: number;
   gstRate: number;
   taxableAmount: number;
   gstAmount: number;
@@ -254,6 +258,8 @@ export function GSTProvider({ children }: { children: ReactNode }) {
           invoiceDate: p.invoice_date || "",
           description: p.description || "",
           hsn: p.hsn || "",
+          quantity: p.quantity || 1,
+          rate: p.rate || 0,
           gstRate: p.gst_rate || 0,
           taxableAmount: p.taxable_amount || 0,
           gstAmount: p.gst_amount || 0,
@@ -271,6 +277,8 @@ export function GSTProvider({ children }: { children: ReactNode }) {
           invoiceDate: s.invoice_date || "",
           description: s.description || "",
           hsn: s.hsn || "",
+          quantity: s.quantity || 1,
+          rate: s.rate || 0,
           gstRate: s.gst_rate || 0,
           taxableAmount: s.taxable_amount || 0,
           gstAmount: s.gst_amount || 0,
@@ -376,6 +384,8 @@ export function GSTProvider({ children }: { children: ReactNode }) {
       invoice_date: data.invoiceDate,
       description: data.description,
       hsn: data.hsn,
+      quantity: data.quantity || 1,
+      rate: data.rate || 0,
       gst_rate: data.gstRate,
       taxable_amount: data.taxableAmount,
       gst_amount: data.gstAmount,
@@ -396,6 +406,8 @@ export function GSTProvider({ children }: { children: ReactNode }) {
       invoice_date: data.invoiceDate,
       description: data.description,
       hsn: data.hsn,
+      quantity: data.quantity || 1,
+      rate: data.rate || 0,
       gst_rate: data.gstRate,
       taxable_amount: data.taxableAmount,
       gst_amount: data.gstAmount,
@@ -441,6 +453,8 @@ export function GSTProvider({ children }: { children: ReactNode }) {
       invoice_date: data.invoiceDate,
       description: data.description,
       hsn: data.hsn,
+      quantity: data.quantity || 1,
+      rate: data.rate || 0,
       gst_rate: data.gstRate,
       taxable_amount: data.taxableAmount,
       gst_amount: data.gstAmount,
@@ -461,6 +475,8 @@ export function GSTProvider({ children }: { children: ReactNode }) {
       invoice_date: data.invoiceDate,
       description: data.description,
       hsn: data.hsn,
+      quantity: data.quantity || 1,
+      rate: data.rate || 0,
       gst_rate: data.gstRate,
       taxable_amount: data.taxableAmount,
       gst_amount: data.gstAmount,

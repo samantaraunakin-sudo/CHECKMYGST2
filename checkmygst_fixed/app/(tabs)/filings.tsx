@@ -69,7 +69,9 @@ export default function FilingsScreen() {
   const [showPicker, setShowPicker] = useState(false);
   const [pickerYear, setPickerYear] = useState(now.getFullYear());
   const [showInfo, setShowInfo] = useState(false);
-  const [notifEnabled, setNotifEnabled] = useState(false);
+  const [notifEnabled, setNotifEnabled] = useState(() => {
+    try { return localStorage.getItem('notifEnabled') === 'true'; } catch { return false; }
+  });
   const [emailSent, setEmailSent] = useState(false);
   const [isSendingEmail, setIsSendingEmail] = useState(false);
   const [showFiledModal, setShowFiledModal] = useState(false);
@@ -158,6 +160,7 @@ export default function FilingsScreen() {
     const perm = await Notification.requestPermission();
     if (perm === "granted") {
       setNotifEnabled(true);
+      try { localStorage.setItem('notifEnabled', 'true'); } catch {}
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       new Notification("CheckMyGST Reminders Enabled", {
         body: "You will receive GST filing reminders in your browser.",
