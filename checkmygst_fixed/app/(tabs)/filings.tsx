@@ -1,12 +1,13 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Platform, Modal
+  Platform, Modal, ActivityIndicator
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { useGST } from "@/contexts/GSTContext";
 import { getApiUrl } from "@/lib/query-client";
+import { supabase } from "@/lib/supabase";
 import Colors from "@/constants/colors";
 import * as Haptics from "expo-haptics";
 
@@ -43,8 +44,8 @@ function getStatusColor(daysLeft: number, filed: boolean) {
   return "#2563eb";
 }
 
-function getStatusLabel(daysLeft: number, filed: boolean) {
-  if (filed) return "Filed ✓";
+function getStatusLabel(daysLeft: number, filed: boolean, filedDate?: string) {
+  if (filed) return filedDate ? `Filed ✓ ${filedDate}` : "Filed ✓";
   if (daysLeft < 0) return `Overdue by ${Math.abs(daysLeft)}d`;
   if (daysLeft === 0) return "Due Today!";
   if (daysLeft <= 3) return `Due in ${daysLeft}d ⚠️`;
@@ -56,21 +57,101 @@ export default function FilingsScreen() {
   const { profile, purchases, sales } = useGST();
   const now = new Date();
 
-  // Selected periods — user can add/remove
-  // Show previous month first (that's what's actually due NOW)
-  // and current month so user can see upcoming deadlines
   const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
   const [selectedPeriods, setSelectedPeriods] = useState<{year: number, month: number}[]>([
     { year: prevMonth.getFullYear(), month: prevMonth.getMonth() },
     { year: now.getFullYear(), month: now.getMonth() },
   ]);
-  const [filedStatus, setFiledStatus] = useState<Record<string, boolean>>({});
+
+  // filedStatus now stores { filed: boolean, filedDate: string, filedBy: string }
+  const [filedStatus, setFiledStatus] = useState<Record<string, { filed: boolean; filedDate: string; filedBy: string }>>({});
+  const [isLoadingStatus, setIsLoadingStatus] = useState(true);
   const [showPicker, setShowPicker] = useState(false);
   const [pickerYear, setPickerYear] = useState(now.getFullYear());
   const [showInfo, setShowInfo] = useState(false);
   const [notifEnabled, setNotifEnabled] = useState(false);
   const [emailSent, setEmailSent] = useState(false);
   const [isSendingEmail, setIsSendingEmail] = useState(false);
+  const [showFiledModal, setShowFiledModal] = useState(false);
+  const [pendingKey, setPendingKey] = useState<string | null>(null);
+  const [filedByInput, setFiledByInput] = useState("CA");
+
+  // Load filing status from Supabase on mount
+  useEffect(() => {
+    if (profile?.id) loadFilingStatus();
+  }, [profile?.id]);
+
+  const loadFilingStatus = async () => {
+    setIsLoadingStatus(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user?.id) { setIsLoadingStatus(false); return; }
+      const { data, error } = await supabase
+        .from("filing_status")
+        .select("*")
+        .eq("user_id", user.id);
+      if (data) {
+        const statusMap: Record<string, { filed: boolean; filedDate: string; filedBy: string }> = {};
+        data.forEach((row: any) => {
+          statusMap[row.filing_key] = {
+            filed: row.filed,
+            filedDate: row.filed_date || "",
+            filedBy: row.filed_by || "",
+          };
+        });
+        setFiledStatus(statusMap);
+      }
+    } catch (e) {
+      console.error("Error loading filing status:", e);
+    }
+    setIsLoadingStatus(false);
+  };
+
+  const toggleFiled = async (key: string) => {
+    const current = filedStatus[key];
+    if (current?.filed) {
+      // Unmark filed
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      const newStatus = { filed: false, filedDate: "", filedBy: "" };
+      setFiledStatus(prev => ({ ...prev, [key]: newStatus }));
+      if (profile?.id) {
+        await supabase.from("filing_status").upsert({
+          user_id: profile.id,
+          filing_key: key,
+          filed: false,
+          filed_date: null,
+          filed_by: null,
+          updated_at: new Date().toISOString(),
+        });
+      }
+    } else {
+      // Show modal to confirm who filed
+      setPendingKey(key);
+      setFiledByInput("CA");
+      setShowFiledModal(true);
+    }
+  };
+
+  const confirmFiled = async () => {
+    if (!pendingKey) return;
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    const today = new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+    const newStatus = { filed: true, filedDate: today, filedBy: filedByInput };
+    setFiledStatus(prev => ({ ...prev, [pendingKey]: newStatus }));
+    setShowFiledModal(false);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user?.id) {
+      await supabase.from("filing_status").upsert({
+        user_id: user.id,
+        filing_key: pendingKey,
+        filed: true,
+        filed_date: today,
+        filed_by: filedByInput,
+        updated_at: new Date().toISOString(),
+      });
+    }
+    setPendingKey(null);
+  };
 
   const enableBrowserNotifications = async () => {
     if (typeof Notification === "undefined") { alert("Browser notifications not supported"); return; }
@@ -89,12 +170,11 @@ export default function FilingsScreen() {
     if (!profile?.id) { alert("Please complete your profile first"); return; }
     setIsSendingEmail(true);
     try {
-      const now = new Date();
       const upcomingReminders: any[] = [];
       selectedPeriods.forEach(({ year, month }) => {
         ["GSTR-1", "GSTR-3B"].forEach(rt => {
           const key = year + "-" + month + "-" + rt;
-          if (!filedStatus[key]) {
+          if (!filedStatus[key]?.filed) {
             const nextMonth = month === 11 ? 0 : month + 1;
             const nextYear = month === 11 ? year + 1 : year;
             const dueDate = new Date(nextYear, nextMonth, rt === "GSTR-1" ? 11 : 20);
@@ -142,7 +222,7 @@ export default function FilingsScreen() {
   };
 
   const removePeriod = (year: number, month: number) => {
-    if (selectedPeriods.length === 1) return; // keep at least one
+    if (selectedPeriods.length === 1) return;
     setSelectedPeriods(prev => prev.filter(p => !(p.year === year && p.month === month)));
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   };
@@ -163,11 +243,6 @@ export default function FilingsScreen() {
     return { purchases: mp.length, sales: ms.length, netGST: salesGST - purchaseGST };
   };
 
-  const toggleFiled = (key: string) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setFiledStatus(prev => ({ ...prev, [key]: !prev[key] }));
-  };
-
   const urgentCount = useMemo(() => {
     let count = 0;
     selectedPeriods.forEach(({ year, month }) => {
@@ -175,15 +250,31 @@ export default function FilingsScreen() {
         const key = `${year}-${month}-${rt}`;
         const due = getDueDate(year, month, rt);
         const days = getDaysLeft(due);
-        if (!filedStatus[key] && days >= 0 && days <= 7) count++;
+        if (!filedStatus[key]?.filed && days >= 0 && days <= 7) count++;
       });
     });
     return count;
   }, [selectedPeriods, filedStatus]);
 
+  // CA Watch summary — how many returns CA has filed vs total
+  const caWatchStats = useMemo(() => {
+    let total = 0, filedByCa = 0, overdue = 0;
+    selectedPeriods.forEach(({ year, month }) => {
+      RETURN_TYPES.forEach(rt => {
+        const key = `${year}-${month}-${rt}`;
+        const due = getDueDate(year, month, rt);
+        const days = getDaysLeft(due);
+        total++;
+        const status = filedStatus[key];
+        if (status?.filed && status.filedBy?.toLowerCase().includes("ca")) filedByCa++;
+        if (!status?.filed && days < 0) overdue++;
+      });
+    });
+    return { total, filedByCa, overdue };
+  }, [selectedPeriods, filedStatus]);
+
   return (
     <View style={styles.container}>
-      {/* Header */}
       <View style={styles.header}>
         <View>
           <Text style={styles.headerTitle}>GST Filings</Text>
@@ -204,6 +295,43 @@ export default function FilingsScreen() {
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
+
+        {/* CA Watch Banner */}
+        <View style={styles.caWatchCard}>
+          <View style={styles.caWatchHeader}>
+            <Ionicons name="eye-outline" size={18} color="#7c3aed" />
+            <Text style={styles.caWatchTitle}>CA Watch</Text>
+            <Text style={styles.caWatchSub}>Track whether your CA is filing on time</Text>
+          </View>
+          <View style={styles.caWatchRow}>
+            <View style={styles.caWatchStat}>
+              <Text style={styles.caWatchStatValue}>{caWatchStats.total}</Text>
+              <Text style={styles.caWatchStatLabel}>Total Returns</Text>
+            </View>
+            <View style={[styles.caWatchStat, { borderLeftWidth: 1, borderLeftColor: "#e9d5ff" }]}>
+              <Text style={[styles.caWatchStatValue, { color: "#16a34a" }]}>{caWatchStats.filedByCa}</Text>
+              <Text style={styles.caWatchStatLabel}>Filed by CA</Text>
+            </View>
+            <View style={[styles.caWatchStat, { borderLeftWidth: 1, borderLeftColor: "#e9d5ff" }]}>
+              <Text style={[styles.caWatchStatValue, { color: caWatchStats.overdue > 0 ? "#dc2626" : "#9ca3af" }]}>{caWatchStats.overdue}</Text>
+              <Text style={styles.caWatchStatLabel}>Overdue</Text>
+            </View>
+          </View>
+          {caWatchStats.overdue > 0 && (
+            <View style={styles.caWatchAlert}>
+              <Ionicons name="warning-outline" size={14} color="#dc2626" />
+              <Text style={styles.caWatchAlertText}>
+                {caWatchStats.overdue} return{caWatchStats.overdue > 1 ? "s are" : " is"} overdue — contact your CA immediately
+              </Text>
+            </View>
+          )}
+          {caWatchStats.overdue === 0 && caWatchStats.filedByCa === caWatchStats.total && (
+            <View style={[styles.caWatchAlert, { backgroundColor: "#f0fdf4", borderColor: "#bbf7d0" }]}>
+              <Ionicons name="checkmark-circle-outline" size={14} color="#16a34a" />
+              <Text style={[styles.caWatchAlertText, { color: "#166534" }]}>Your CA is on track — all returns filed ✓</Text>
+            </View>
+          )}
+        </View>
 
         {/* Quick Actions */}
         <View style={styles.quickActions}>
@@ -250,13 +378,19 @@ export default function FilingsScreen() {
           </TouchableOpacity>
         </View>
 
+        {isLoadingStatus && (
+          <View style={{ alignItems: "center", paddingVertical: 12 }}>
+            <ActivityIndicator size="small" color={Colors.primary} />
+            <Text style={{ fontSize: 12, color: "#9ca3af", marginTop: 6 }}>Loading filing status...</Text>
+          </View>
+        )}
+
         {/* Period Cards */}
         {selectedPeriods.map(({ year, month }) => {
           const stats = getMonthStats(year, month);
           const isCurrentMonth = year === now.getFullYear() && month === now.getMonth();
           return (
             <View key={`${year}-${month}`} style={[styles.monthBlock, isCurrentMonth && styles.monthBlockCurrent]}>
-              {/* Month Header */}
               <View style={styles.monthHeader}>
                 <View>
                   <Text style={styles.monthName}>
@@ -277,12 +411,12 @@ export default function FilingsScreen() {
                 )}
               </View>
 
-              {/* Return Rows */}
               {RETURN_TYPES.map(rt => {
                 const key = `${year}-${month}-${rt}`;
                 const due = getDueDate(year, month, rt);
                 const daysLeft = getDaysLeft(due);
-                const filed = filedStatus[key] || false;
+                const status = filedStatus[key];
+                const filed = status?.filed || false;
                 const statusColor = getStatusColor(daysLeft, filed);
                 return (
                   <View key={rt} style={styles.returnRow}>
@@ -300,6 +434,9 @@ export default function FilingsScreen() {
                       <Text style={styles.returnDue}>
                         Due: {due.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
                       </Text>
+                      {filed && status?.filedBy && (
+                        <Text style={styles.filedByLabel}>Filed by: {status.filedBy} on {status.filedDate}</Text>
+                      )}
                     </View>
                     <View style={styles.returnRight}>
                       <Text style={[styles.statusLabel, { color: statusColor }]}>
@@ -341,12 +478,38 @@ export default function FilingsScreen() {
 
       </ScrollView>
 
+      {/* Mark Filed Modal */}
+      <Modal visible={showFiledModal} transparent animationType="slide">
+        <TouchableOpacity style={styles.modalOverlay} onPress={() => setShowFiledModal(false)} activeOpacity={1}>
+          <View style={styles.modalBox}>
+            <Text style={styles.modalTitle}>Who filed this return?</Text>
+            <Text style={styles.modalSub}>This will be saved and shown in CA Watch</Text>
+            <View style={styles.filedByOptions}>
+              {["CA", "Self", "Tax Consultant", "Other"].map(opt => (
+                <TouchableOpacity
+                  key={opt}
+                  style={[styles.filedByOption, filedByInput === opt && styles.filedByOptionActive]}
+                  onPress={() => setFiledByInput(opt)}
+                >
+                  <Text style={[styles.filedByOptionText, filedByInput === opt && { color: "#fff" }]}>{opt}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <TouchableOpacity style={styles.confirmBtn} onPress={confirmFiled}>
+              <Text style={styles.confirmBtnText}>Confirm Filed ✓</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.cancelBtn} onPress={() => setShowFiledModal(false)}>
+              <Text style={styles.cancelBtnText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
       {/* Month Picker Modal */}
       <Modal visible={showPicker} transparent animationType="slide">
         <TouchableOpacity style={styles.modalOverlay} onPress={() => setShowPicker(false)} activeOpacity={1}>
           <View style={styles.modalBox}>
             <Text style={styles.modalTitle}>Select Month & Year</Text>
-            {/* Year selector */}
             <View style={styles.yearRow}>
               {years.map(y => (
                 <TouchableOpacity
@@ -358,7 +521,6 @@ export default function FilingsScreen() {
                 </TouchableOpacity>
               ))}
             </View>
-            {/* Month grid */}
             <View style={styles.monthGrid}>
               {MONTHS.map((m, i) => {
                 const already = selectedPeriods.some(p => p.year === pickerYear && p.month === i);
@@ -419,6 +581,16 @@ const styles = StyleSheet.create({
   urgentBadgeText: { fontSize: 12, fontWeight: "700", color: "#dc2626" },
   infoBtn: { padding: 4 },
   scroll: { padding: 16, paddingBottom: 40 },
+  caWatchCard: { backgroundColor: "#fdf4ff", borderRadius: 16, padding: 16, marginBottom: 14, borderWidth: 1.5, borderColor: "#e9d5ff" },
+  caWatchHeader: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 12 },
+  caWatchTitle: { fontSize: 15, fontWeight: "800", color: "#7c3aed" },
+  caWatchSub: { fontSize: 11, color: "#9ca3af", flex: 1 },
+  caWatchRow: { flexDirection: "row", marginBottom: 10 },
+  caWatchStat: { flex: 1, alignItems: "center", paddingVertical: 4 },
+  caWatchStatValue: { fontSize: 22, fontWeight: "800", color: "#7c3aed" },
+  caWatchStatLabel: { fontSize: 11, color: "#9ca3af", marginTop: 2 },
+  caWatchAlert: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "#fef2f2", borderRadius: 8, padding: 8, borderWidth: 1, borderColor: "#fecaca" },
+  caWatchAlertText: { fontSize: 12, color: "#dc2626", fontWeight: "600", flex: 1 },
   quickActions: { flexDirection: "row", gap: 8, marginBottom: 12 },
   quickBtn: { flex: 1, backgroundColor: "#fff", borderRadius: 12, padding: 10, alignItems: "center", gap: 4, borderWidth: 1, borderColor: "#e5e7eb" },
   quickBtnText: { fontSize: 11, fontWeight: "600", color: Colors.primary, textAlign: "center" },
@@ -440,6 +612,7 @@ const styles = StyleSheet.create({
   returnName: { fontSize: 14, fontWeight: "700", color: "#111827" },
   returnDue: { fontSize: 12, color: "#6b7280", marginTop: 2 },
   returnDesc: { fontSize: 11, color: "#9ca3af", marginTop: 1, lineHeight: 15 },
+  filedByLabel: { fontSize: 11, color: "#7c3aed", marginTop: 3, fontWeight: "600" },
   returnRight: { alignItems: "flex-end", gap: 6 },
   statusLabel: { fontSize: 12, fontWeight: "700" },
   filedBtn: { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 8, borderWidth: 1 },
@@ -451,7 +624,16 @@ const styles = StyleSheet.create({
   penaltyValue: { fontSize: 12, fontWeight: "600", color: "#92400e" },
   modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
   modalBox: { backgroundColor: "#fff", borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24 },
-  modalTitle: { fontSize: 18, fontWeight: "700", textAlign: "center", marginBottom: 20, color: "#111827" },
+  modalTitle: { fontSize: 18, fontWeight: "700", textAlign: "center", marginBottom: 6, color: "#111827" },
+  modalSub: { fontSize: 13, color: "#6b7280", textAlign: "center", marginBottom: 20 },
+  filedByOptions: { flexDirection: "row", flexWrap: "wrap", gap: 10, justifyContent: "center", marginBottom: 20 },
+  filedByOption: { paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20, borderWidth: 1.5, borderColor: "#e5e7eb", backgroundColor: "#f9fafb" },
+  filedByOptionActive: { backgroundColor: "#7c3aed", borderColor: "#7c3aed" },
+  filedByOptionText: { fontSize: 14, fontWeight: "600", color: "#374151" },
+  confirmBtn: { backgroundColor: "#16a34a", borderRadius: 12, padding: 14, alignItems: "center", marginBottom: 10 },
+  confirmBtnText: { color: "#fff", fontWeight: "700", fontSize: 15 },
+  cancelBtn: { alignItems: "center", padding: 10 },
+  cancelBtnText: { color: "#9ca3af", fontSize: 14 },
   yearRow: { flexDirection: "row", justifyContent: "center", gap: 12, marginBottom: 20 },
   yearBtn: { paddingHorizontal: 20, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: "#e5e7eb" },
   yearBtnActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
