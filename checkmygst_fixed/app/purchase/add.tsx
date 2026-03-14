@@ -170,7 +170,7 @@ export default function AddPurchaseScreen() {
           description: item.description || "",
           hsn: item.hsn || "",
           quantity: String(item.quantity || "1"),
-          rate: String(item.rate || item.taxableAmount || ""),
+          rate: String(item.rate || ""),
           gstRate: item.gstRate || 18,
         })));
       }

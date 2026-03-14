@@ -383,15 +383,13 @@ export function GSTProvider({ children }: { children: ReactNode }) {
       description: data.description,
       hsn: data.hsn,
       quantity: data.quantity || 1,
-      rate: data.rate || data.taxableAmount || 0,
+      rate: data.rate || 0,
       gst_rate: data.gstRate,
       taxable_amount: data.taxableAmount,
       gst_amount: data.gstAmount,
       total_amount: data.totalAmount,
     });
     if (error) throw error;
-    
-    // Fixed Memory: Added quantity and rate explicitly here
     const newPurchase = { 
       ...data, 
       id, 
@@ -413,15 +411,13 @@ export function GSTProvider({ children }: { children: ReactNode }) {
       description: data.description,
       hsn: data.hsn,
       quantity: data.quantity || 1,
-      rate: data.rate || data.taxableAmount || 0,
+      rate: data.rate || 0,
       gst_rate: data.gstRate,
       taxable_amount: data.taxableAmount,
       gst_amount: data.gstAmount,
       total_amount: data.totalAmount,
     }).eq("id", id);
-    
-    // Fixed Memory
-    setPurchases(prev => prev.map(p => p.id === id ? { ...p, ...data, quantity: data.quantity || p.quantity, rate: data.rate || p.rate } : p));
+    setPurchases(prev => prev.map(p => p.id === id ? { ...p, ...data, quantity: data.quantity ?? p.quantity, rate: data.rate ?? p.rate } : p));
   }, [userId]);
 
   const deletePurchase = useCallback(async (id: string) => {
