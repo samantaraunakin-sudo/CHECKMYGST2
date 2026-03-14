@@ -1,5 +1,5 @@
 import { sharePDF, printPDF } from "../../lib/pdfGenerator";
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView,
   Platform, ActivityIndicator, Alert,
@@ -52,10 +52,17 @@ export default function AddSaleScreen() {
     { id: generateId(), description: "", hsn: "", quantity: "", rate: "", gstRate: 18 },
   ]);
 
+  // itemsRef always holds latest items — fixes web stale closure bug on Save
+  const itemsRef = useRef<LineItem[]>([
+    { id: "init", description: "", hsn: "", quantity: "", rate: "", gstRate: 18 },
+  ]);
+  // Sync ref on every items change
+  const syncItems = (newItems: LineItem[]) => { itemsRef.current = newItems; return newItems; };
+
   const updateForm = (key: string, value: string) => setForm(p => ({ ...p, [key]: value }));
 
   const updateItem = (id: string, key: keyof LineItem, value: string | number) => {
-    setItems(prev => prev.map(item => item.id === id ? { ...item, [key]: value } : item));
+    setItems(prev => syncItems(prev.map(item => item.id === id ? { ...item, [key]: value } : item)));
   };
 
   const addItem = () => {
@@ -213,7 +220,9 @@ export default function AddSaleScreen() {
   const handleSave = async () => {
     if (!form.customerName.trim()) { Alert.alert("Required", "Customer name is required"); return; }
     if (!form.invoiceNumber.trim()) { Alert.alert("Required", "Invoice number is required"); return; }
-    const validItems = items.filter(i => i.description.trim() && parseFloat(i.quantity || "0") > 0 && parseFloat(i.rate || "0") > 0);
+    // Use ref — guaranteed latest values even if state hasn't flushed on web
+    const currentItems = itemsRef.current;
+    const validItems = currentItems.filter(i => i.description.trim() && parseFloat(i.quantity || "0") > 0 && parseFloat(i.rate || "0") > 0);
     if (validItems.length === 0) { Alert.alert("Required", "At least one product with quantity and rate is required"); return; }
 
     setIsSaving(true);
@@ -408,11 +417,11 @@ export default function AddSaleScreen() {
             <View style={styles.row}>
               <View style={[styles.field, { flex: 1 }]}>
                 <Text style={styles.label}>Quantity *</Text>
-                <TextInput style={styles.input} placeholder="0" placeholderTextColor={Colors.textMuted} value={item.quantity} onChangeText={v => updateItem(item.id, "quantity", v)} keyboardType="numeric" />
+                <TextInput style={styles.input} placeholder="0" placeholderTextColor={Colors.textMuted} value={item.quantity} onChangeText={v => updateItem(item.id, "quantity", v)} onEndEditing={e => updateItem(item.id, "quantity", e.nativeEvent.text)} keyboardType="numeric" />
               </View>
               <View style={[styles.field, { flex: 1 }]}>
                 <Text style={styles.label}>Rate per unit (₹) *</Text>
-                <TextInput style={styles.input} placeholder="0.00" placeholderTextColor={Colors.textMuted} value={item.rate} onChangeText={v => updateItem(item.id, "rate", v)} keyboardType="numeric" />
+                <TextInput style={styles.input} placeholder="0.00" placeholderTextColor={Colors.textMuted} value={item.rate} onChangeText={v => updateItem(item.id, "rate", v)} onEndEditing={e => updateItem(item.id, "rate", e.nativeEvent.text)} keyboardType="numeric" />
               </View>
             </View>
 
