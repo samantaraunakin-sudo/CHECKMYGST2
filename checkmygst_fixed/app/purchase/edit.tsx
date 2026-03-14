@@ -64,8 +64,8 @@ export default function EditPurchaseScreen() {
         id: generateId(),
         description: item.description || "",
         hsn: item.hsn || "",
-        quantity: String(item.quantity || "1"),
-        rate: String(item.rate || ""),
+        quantity: String(purchase.quantity && purchase.quantity > 0 ? purchase.quantity : 1),
+        rate: String(purchase.rate && purchase.rate > 0 ? purchase.rate : (purchase.taxableAmount || 0)),
         gstRate: item.gstRate || 18,
       })));
     } else {

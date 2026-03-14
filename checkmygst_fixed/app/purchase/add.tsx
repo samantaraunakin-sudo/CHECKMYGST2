@@ -204,7 +204,7 @@ export default function AddPurchaseScreen() {
         description: validItems.map(i => i.description).join(", "),
         hsn: validItems[0].hsn,
         quantity: parseFloat(validItems[0].quantity) || 1, // FORCE PARSE
-        rate: parseFloat(validItems[0].rate) || 0,        // FORCE PARSE
+        rate: parseFloat(validItems[0].rate) || 0,
         gstRate: validItems[0].gstRate,
         taxableAmount: subtotal,
         gstAmount: totalGST,

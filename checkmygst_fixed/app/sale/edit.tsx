@@ -62,8 +62,8 @@ export default function EditSaleScreen() {
         id: generateId(),
         description: item.description || "",
         hsn: item.hsn || "",
-        quantity: String(item.quantity || "1"),
-        rate: String(item.rate || ""),
+        quantity: String(sale.quantity && sale.quantity > 0 ? sale.quantity : 1),
+        rate: String(sale.rate && sale.rate > 0 ? sale.rate : (sale.taxableAmount || 0)),
         gstRate: item.gstRate || 18,
       })));
     } else {
