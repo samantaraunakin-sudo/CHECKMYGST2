@@ -1,5 +1,5 @@
 import { sharePDF, printPDF } from "../../lib/pdfGenerator";
-import React, { useState, useRef } from "react";
+import React, { useState } from "react";
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView,
   Platform, ActivityIndicator, Alert,
@@ -53,14 +53,12 @@ export default function AddSaleScreen() {
     return initial;
   });
 
-  // itemsRef always holds latest items — fixes web stale closure bug on Save
-  const itemsRef = useRef<LineItem[]>(items);
-  const syncItems = (newItems: LineItem[]) => { itemsRef.current = newItems; return newItems; };
+
 
   const updateForm = (key: string, value: string) => setForm(p => ({ ...p, [key]: value }));
 
   const updateItem = (id: string, key: keyof LineItem, value: string | number) => {
-    setItems(prev => syncItems(prev.map(item => item.id === id ? { ...item, [key]: value } : item)));
+    setItems(prev => prev.map(item => item.id === id ? { ...item, [key]: String(value) } : item));
   };
 
   const addItem = () => {
@@ -218,10 +216,15 @@ export default function AddSaleScreen() {
   const handleSave = async () => {
     if (!form.customerName.trim()) { Alert.alert("Required", "Customer name is required"); return; }
     if (!form.invoiceNumber.trim()) { Alert.alert("Required", "Invoice number is required"); return; }
-    // Use ref — guaranteed latest values even if state hasn't flushed on web
-    const currentItems = itemsRef.current;
-    const validItems = currentItems.filter(i => i.description.trim() && parseFloat(i.quantity || "0") > 0 && parseFloat(i.rate || "0") > 0);
+    const snapshot = [...items];
+    const validItems = snapshot.filter(i => i.description.trim() && parseFloat(i.quantity || "0") > 0 && parseFloat(i.rate || "0") > 0);
     if (validItems.length === 0) { Alert.alert("Required", "At least one product with quantity and rate is required"); return; }
+
+    const snapSubtotal = snapshot.reduce((s, i) => { const q = parseFloat(i.quantity||"0"); const r = parseFloat(i.rate||"0"); return s + q*r; }, 0);
+    const snapGST = snapshot.reduce((s, i) => { const q = parseFloat(i.quantity||"0"); const r = parseFloat(i.rate||"0"); const t = q*r; return s + t*(i.gstRate/100); }, 0);
+    const snapTotal = Math.round(snapSubtotal + snapGST);
+    const firstQty = parseFloat(validItems[0].quantity);
+    const firstRate = parseFloat(validItems[0].rate);
 
     setIsSaving(true);
     try {
@@ -232,12 +235,12 @@ export default function AddSaleScreen() {
         invoiceDate: form.invoiceDate || getTodayDate(),
         description: validItems.map(i => i.description).join(", "),
         hsn: validItems[0].hsn,
-        quantity: parseFloat(validItems[0].quantity) || 1, // FORCE PARSE
-        rate: parseFloat(validItems[0].rate) || 0,        // FORCE PARSE
+        quantity: firstQty,
+        rate: firstRate,
         gstRate: validItems[0].gstRate,
-        taxableAmount: subtotal,
-        gstAmount: totalGST,
-        totalAmount: grandTotal,
+        taxableAmount: snapSubtotal,
+        gstAmount: snapGST,
+        totalAmount: snapTotal,
       });
 
       const { data: { user } } = await supabase.auth.getUser();
