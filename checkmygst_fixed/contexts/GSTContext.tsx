@@ -133,21 +133,19 @@ export function getTodayDate(): string {
 
 export function parseInvoiceDate(dateStr: string): Date {
   if (!dateStr) return new Date();
-  // DD/MM/YYYY format
   if (dateStr.includes("/")) {
     const parts = dateStr.split("/");
     if (parts.length === 3) {
       return new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
     }
   }
-  // YYYY-MM-DD ISO format from Supabase
   if (dateStr.includes("-") && dateStr.length >= 10) {
     const parts = dateStr.substring(0, 10).split("-");
     return new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
   }
   return new Date(dateStr);
 }
-// Normalize any date to DD/MM/YYYY for display
+
 export function normalizeDateDisplay(dateStr: string): string {
   if (!dateStr) return "";
   if (dateStr.includes("/")) return dateStr;
@@ -392,7 +390,15 @@ export function GSTProvider({ children }: { children: ReactNode }) {
       total_amount: data.totalAmount,
     });
     if (error) throw error;
-    const newPurchase = { ...data, id, createdAt: new Date().toISOString() };
+    
+    // Fixed Memory: Added quantity and rate explicitly here
+    const newPurchase = { 
+      ...data, 
+      id, 
+      quantity: data.quantity || 1, 
+      rate: data.rate || 0, 
+      createdAt: new Date().toISOString() 
+    };
     setPurchases(prev => [newPurchase, ...prev]);
     return newPurchase;
   }, [userId]);
@@ -413,7 +419,9 @@ export function GSTProvider({ children }: { children: ReactNode }) {
       gst_amount: data.gstAmount,
       total_amount: data.totalAmount,
     }).eq("id", id);
-    setPurchases(prev => prev.map(p => p.id === id ? { ...p, ...data } : p));
+    
+    // Fixed Memory
+    setPurchases(prev => prev.map(p => p.id === id ? { ...p, ...data, quantity: data.quantity || p.quantity, rate: data.rate || p.rate } : p));
   }, [userId]);
 
   const deletePurchase = useCallback(async (id: string) => {
@@ -461,7 +469,15 @@ export function GSTProvider({ children }: { children: ReactNode }) {
       total_amount: data.totalAmount,
     });
     if (error) throw error;
-    const newSale = { ...data, id, createdAt: new Date().toISOString() };
+    
+    // Fixed Memory
+    const newSale = { 
+      ...data, 
+      id, 
+      quantity: data.quantity || 1, 
+      rate: data.rate || 0, 
+      createdAt: new Date().toISOString() 
+    };
     setSales(prev => [newSale, ...prev]);
     return newSale;
   }, [userId]);
@@ -482,7 +498,9 @@ export function GSTProvider({ children }: { children: ReactNode }) {
       gst_amount: data.gstAmount,
       total_amount: data.totalAmount,
     }).eq("id", id);
-    setSales(prev => prev.map(s => s.id === id ? { ...s, ...data } : s));
+    
+    // Fixed Memory
+    setSales(prev => prev.map(s => s.id === id ? { ...s, ...data, quantity: data.quantity || s.quantity, rate: data.rate || s.rate } : s));
   }, [userId]);
 
   const deleteSale = useCallback(async (id: string) => {
