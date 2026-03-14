@@ -225,8 +225,8 @@ export default function AddSaleScreen() {
         invoiceDate: form.invoiceDate || getTodayDate(),
         description: validItems.map(i => i.description).join(", "),
         hsn: validItems[0].hsn,
-        quantity: parseFloat(validItems[0].quantity) || 1,
-        rate: parseFloat(validItems[0].rate) || 0,
+        quantity: parseFloat(validItems[0].quantity) || 1, // FORCE PARSE
+        rate: parseFloat(validItems[0].rate) || 0,        // FORCE PARSE
         gstRate: validItems[0].gstRate,
         taxableAmount: subtotal,
         gstAmount: totalGST,
