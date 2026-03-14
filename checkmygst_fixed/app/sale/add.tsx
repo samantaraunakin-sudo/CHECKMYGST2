@@ -48,15 +48,13 @@ export default function AddSaleScreen() {
     invoiceDate: getTodayDate(),
   });
 
-  const [items, setItems] = useState<LineItem[]>([
-    { id: generateId(), description: "", hsn: "", quantity: "", rate: "", gstRate: 18 },
-  ]);
+  const [items, setItems] = useState<LineItem[]>(() => {
+    const initial = [{ id: generateId(), description: "", hsn: "", quantity: "", rate: "", gstRate: 18 }];
+    return initial;
+  });
 
   // itemsRef always holds latest items — fixes web stale closure bug on Save
-  const itemsRef = useRef<LineItem[]>([
-    { id: "init", description: "", hsn: "", quantity: "", rate: "", gstRate: 18 },
-  ]);
-  // Sync ref on every items change
+  const itemsRef = useRef<LineItem[]>(items);
   const syncItems = (newItems: LineItem[]) => { itemsRef.current = newItems; return newItems; };
 
   const updateForm = (key: string, value: string) => setForm(p => ({ ...p, [key]: value }));
